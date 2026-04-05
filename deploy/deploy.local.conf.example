@@ -1,0 +1,40 @@
+# Sub2API 零停机部署本地配置
+# 复制为 deploy/deploy.local.conf 后再修改，不要提交真实配置。
+
+REMOTE_HOST="YOUR_SERVER_IP"
+REMOTE_USER="root"
+REMOTE_DIR="/www/wwwroot/s2.ai80.vip"
+PUBLIC_URL="https://s2.ai80.vip"
+SSH_KEY=""
+
+BINARY_NAME="sub2api"
+TARGET_GOOS="linux"
+TARGET_GOARCH="amd64"
+LAUNCH_WRAPPER_NAME="run-sub2api.sh"
+
+# 进程管理方式：
+# 1) 宝塔推荐 supervisor
+# 2) 纯 Linux 服务器可改为 systemd
+# 3) 临时调试可用 nohup
+PROCESS_MANAGER="supervisor"
+
+# supervisor 模式
+SUPERVISORCTL="/www/server/panel/pyenv/bin/supervisorctl"
+SUPERVISOR_PROGRAM="sub2api"
+
+# systemd 模式
+# PROCESS_MANAGER="systemd"
+# SYSTEMD_SERVICE="sub2api"
+
+# 自定义远程命令（如有需要可覆盖上面的方式）
+# REMOTE_STOP_COMMAND=""
+# REMOTE_START_COMMAND=""
+
+# 健康检查
+GIN_MODE="release"
+SERVER_HOST="127.0.0.1"
+SERVER_PORT="8526"
+DATA_DIR="/etc/sub2api"
+HEALTHCHECK_URL="http://127.0.0.1:8526/health"
+RUNTIME_LOG_FILE="/tmp/sub2api.log"
+STARTUP_WAIT_SECONDS="6"

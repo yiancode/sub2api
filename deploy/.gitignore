@@ -9,6 +9,7 @@ redis_data/
 
 # Environment configuration (contains sensitive information)
 .env
+deploy.local.conf
 
 # Backup files
 *.backup

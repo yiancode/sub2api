@@ -16,6 +16,10 @@ This directory contains files for deploying Sub2API on Linux servers.
 | `docker-compose.yml` | Docker Compose configuration (named volumes) |
 | `docker-compose.local.yml` | Docker Compose configuration (local directories, easy migration) |
 | `docker-deploy.sh` | **One-click Docker deployment script (recommended)** |
+| `deploy-zero-downtime.sh` | Binary zero-downtime deployment script for self-hosted servers |
+| `deploy.local.conf.example` | Local deployment config template for zero-downtime script |
+| `sub2api.bt-supervisor.example.ini` | Baota Supervisor example for site-directory deployment |
+| `ZERO_DOWNTIME_CN.md` | 中文零停机部署说明（适合站点目录部署） |
 | `.env.example` | Docker environment variables template |
 | `DOCKER.md` | Docker Hub documentation |
 | `install.sh` | One-click binary installation script |
