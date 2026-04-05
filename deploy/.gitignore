@@ -9,6 +9,9 @@ redis_data/
 
 # Environment configuration (contains sensitive information)
 .env
+deploy.local.conf
+deploy-zero-downtime.sh
+ZERO_DOWNTIME_CN.md
 
 # Backup files
 *.backup
