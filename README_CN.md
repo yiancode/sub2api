@@ -130,6 +130,11 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 | ~~[Sub2ApiPay](https://github.com/touwaeriol/sub2apipay)~~ | ~~自助支付系统~~ | **已内置** — 支付功能已集成到 Sub2API 中，无需独立部署。详见 [支付配置指南](docs/PAYMENT_CN.md) |
 | [sub2api-mobile](https://github.com/ckken/sub2api-mobile) | 移动端管理控制台 | 跨平台应用（iOS/Android/Web），支持用户管理、账号管理、监控看板、多后端切换；基于 Expo + React Native 构建 |
 
+## 文档
+
+- [OpenAI 账号概念与推荐配置](docs/OPENAI_ACCOUNT_CONCEPTS_AND_CONFIGURATION.md) - 解释 OpenAI OAuth 与 API Key、`Base URL`、自动透传、`WS mode`、`仅允许 Codex 官方客户端`，以及 ChatGPT Pro 共享和第三方中转的推荐配置
+- [ADMIN_PAYMENT_INTEGRATION_API](docs/ADMIN_PAYMENT_INTEGRATION_API.md) - 外部支付系统对接 Admin API 说明
+
 ## 技术栈
 
 | 组件 | 技术 |
