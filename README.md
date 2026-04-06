@@ -85,6 +85,11 @@ Community projects that extend or integrate with Sub2API:
 | [Sub2ApiPay](https://github.com/touwaeriol/sub2apipay) | Self-service payment system | Self-service top-up and subscription purchase; supports YiPay protocol, WeChat Pay, Alipay, Stripe; embeddable via iframe |
 | [sub2api-mobile](https://github.com/ckken/sub2api-mobile) | Mobile admin console | Cross-platform app (iOS/Android/Web) for user management, account management, monitoring dashboard, and multi-backend switching; built with Expo + React Native |
 
+## Documentation
+
+- [OpenAI Account Concepts and Recommended Configuration](docs/OPENAI_ACCOUNT_CONCEPTS_AND_CONFIGURATION.md) - Explains OpenAI OAuth vs API Key, `Base URL`, passthrough, `WS mode`, `Codex official clients only`, and recommended settings for ChatGPT Pro sharing and third-party relays
+- [Admin Payment Integration API](docs/ADMIN_PAYMENT_INTEGRATION_API.md) - Admin API integration guide for external payment systems
+
 ## Tech Stack
 
 | Component | Technology |
