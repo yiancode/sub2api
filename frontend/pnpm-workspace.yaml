@@ -1,6 +1,9 @@
 overrides:
   js-cookie: 3.0.7
   form-data@<4.0.6: '>=4.0.6'
+  # Pin past GHSA-r28c-9q8g-f849 / GHSA-6g55-p6wh-862q (>=8.5.18).
+  # 8.5.23 is still inside pnpm 11's default minimumReleaseAge window.
+  postcss: 8.5.22
 
 # Dependencies whose lifecycle scripts are required by the production build.
 allowBuilds:
