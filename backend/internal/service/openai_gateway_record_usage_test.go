@@ -154,6 +154,14 @@ func (s *openAIRecordUsageUserRepoStub) DeductBalance(ctx context.Context, id in
 	return s.deductErr
 }
 
+func (s *openAIRecordUsageUserRepoStub) AdjustBalance(ctx context.Context, id int64, delta float64) (BalanceChange, error) {
+	panic("unexpected AdjustBalance call")
+}
+
+func (s *openAIRecordUsageUserRepoStub) SetBalance(ctx context.Context, id int64, value float64) (BalanceChange, error) {
+	panic("unexpected SetBalance call")
+}
+
 type openAIRecordUsageSubRepoStub struct {
 	UserSubscriptionRepository
 
@@ -1460,8 +1468,8 @@ func TestOpenAIGatewayServiceRecordUsage_ChannelMappedDoesNotOverrideBillingMode
 			Usage:         usage,
 			Duration:      time.Second,
 		},
-		APIKey: &APIKey{ID: 10},
-		User:   &User{ID: 20},
+		APIKey:  &APIKey{ID: 10},
+		User:    &User{ID: 20},
 		Account: &Account{ID: 30},
 		ChannelUsageFields: ChannelUsageFields{
 			ChannelID:          1,
@@ -1501,8 +1509,8 @@ func TestOpenAIGatewayServiceRecordUsage_ChannelMappedOverridesBillingModelWhenM
 			Usage:         usage,
 			Duration:      time.Second,
 		},
-		APIKey: &APIKey{ID: 10},
-		User:   &User{ID: 20},
+		APIKey:  &APIKey{ID: 10},
+		User:    &User{ID: 20},
 		Account: &Account{ID: 30},
 		ChannelUsageFields: ChannelUsageFields{
 			ChannelID:          1,
