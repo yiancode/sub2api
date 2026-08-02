@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -56,6 +57,105 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_JSON(t *testing.T) {
 	require.Equal(t, "1K", parsed.SizeTier)
 	require.Equal(t, OpenAIImagesCapabilityNative, parsed.RequiredCapability)
 	require.False(t, parsed.Multipart)
+}
+
+func newOpenAIImagesJSONEditContext(t *testing.T, body []byte) *gin.Context {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+	return c
+}
+
+func TestOpenAIGatewayServiceParseOpenAIImagesRequest_JSONEditImageFieldCompat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{}
+
+	pngBytes := append([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, make([]byte, 64)...)
+	pngBase64 := base64.StdEncoding.EncodeToString(pngBytes)
+
+	t.Run("image 字段为 data URL 字符串", func(t *testing.T) {
+		body := []byte(`{"model":"gpt-image-2","prompt":"edit","image":"data:image/png;base64,` + pngBase64 + `"}`)
+		parsed, err := svc.ParseOpenAIImagesRequest(newOpenAIImagesJSONEditContext(t, body), body)
+		require.NoError(t, err)
+		require.Len(t, parsed.InputImageURLs, 1)
+		require.True(t, strings.HasPrefix(parsed.InputImageURLs[0], "data:image/png;base64,"))
+		require.Empty(t, parsed.Uploads)
+	})
+
+	t.Run("image 字段为裸 base64 字符串（解码进 Uploads 并嗅探 MIME）", func(t *testing.T) {
+		body := []byte(`{"model":"gpt-image-2","prompt":"edit","image":"` + pngBase64 + `"}`)
+		parsed, err := svc.ParseOpenAIImagesRequest(newOpenAIImagesJSONEditContext(t, body), body)
+		require.NoError(t, err)
+		require.Empty(t, parsed.InputImageURLs)
+		require.Len(t, parsed.Uploads, 1)
+		require.Equal(t, pngBytes, parsed.Uploads[0].Data)
+		require.Equal(t, "image/png", parsed.Uploads[0].ContentType)
+		// 送审链路与 multipart 上传同构：能产出 data URL。
+		require.True(t, strings.HasPrefix(parsed.Uploads[0].ModerationDataURL(), "data:image/png;base64,"))
+	})
+
+	t.Run("image 字段为裸 base64 数组", func(t *testing.T) {
+		body := []byte(`{"model":"gpt-image-2","prompt":"edit","image":["` + pngBase64 + `","` + pngBase64 + `"]}`)
+		parsed, err := svc.ParseOpenAIImagesRequest(newOpenAIImagesJSONEditContext(t, body), body)
+		require.NoError(t, err)
+		require.Len(t, parsed.Uploads, 2)
+	})
+
+	t.Run("image 字段为 url 对象", func(t *testing.T) {
+		body := []byte(`{"model":"gpt-image-2","prompt":"edit","image":{"url":"https://example.com/a.png"}}`)
+		parsed, err := svc.ParseOpenAIImagesRequest(newOpenAIImagesJSONEditContext(t, body), body)
+		require.NoError(t, err)
+		require.Equal(t, []string{"https://example.com/a.png"}, parsed.InputImageURLs)
+	})
+
+	t.Run("images 数组接受纯字符串项", func(t *testing.T) {
+		body := []byte(`{"model":"gpt-image-2","prompt":"edit","images":["https://example.com/a.png","` + pngBase64 + `"]}`)
+		parsed, err := svc.ParseOpenAIImagesRequest(newOpenAIImagesJSONEditContext(t, body), body)
+		require.NoError(t, err)
+		require.Equal(t, []string{"https://example.com/a.png"}, parsed.InputImageURLs)
+		require.Len(t, parsed.Uploads, 1)
+	})
+
+	t.Run("images[].image_url 原有格式不受影响", func(t *testing.T) {
+		body := []byte(`{"model":"gpt-image-2","prompt":"edit","images":[{"image_url":"https://example.com/a.png"}]}`)
+		parsed, err := svc.ParseOpenAIImagesRequest(newOpenAIImagesJSONEditContext(t, body), body)
+		require.NoError(t, err)
+		require.Equal(t, []string{"https://example.com/a.png"}, parsed.InputImageURLs)
+	})
+
+	t.Run("非法 base64 明确报错", func(t *testing.T) {
+		body := []byte(`{"model":"gpt-image-2","prompt":"edit","image":"!!!not-base64!!!"}`)
+		_, err := svc.ParseOpenAIImagesRequest(newOpenAIImagesJSONEditContext(t, body), body)
+		require.ErrorContains(t, err, "invalid base64 image data")
+	})
+
+	t.Run("base64 解码后不是图片内容时拒绝", func(t *testing.T) {
+		textBase64 := base64.StdEncoding.EncodeToString([]byte("hello world, definitely not an image"))
+		body := []byte(`{"model":"gpt-image-2","prompt":"edit","image":"` + textBase64 + `"}`)
+		_, err := svc.ParseOpenAIImagesRequest(newOpenAIImagesJSONEditContext(t, body), body)
+		require.ErrorContains(t, err, "not a recognized image format")
+	})
+
+	t.Run("完全没有图片输入时仍拒绝", func(t *testing.T) {
+		body := []byte(`{"model":"gpt-image-2","prompt":"edit"}`)
+		_, err := svc.ParseOpenAIImagesRequest(newOpenAIImagesJSONEditContext(t, body), body)
+		require.ErrorContains(t, err, "images[].image_url is required")
+	})
+}
+
+func TestDecodeOpenAIImagesJSONBase64_SizeLimit(t *testing.T) {
+	pngBytes := append([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, make([]byte, 64)...)
+	encoded := base64.StdEncoding.EncodeToString(pngBytes)
+
+	_, err := decodeOpenAIImagesJSONBase64(encoded, 16)
+	require.ErrorContains(t, err, "exceeds")
+
+	data, err := decodeOpenAIImagesJSONBase64(encoded, len(pngBytes))
+	require.NoError(t, err)
+	require.Equal(t, pngBytes, data)
 }
 
 func TestOpenAIGatewayServiceParseOpenAIImagesRequest_MultipartEdit(t *testing.T) {

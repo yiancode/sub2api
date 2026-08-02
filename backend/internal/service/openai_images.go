@@ -287,6 +287,22 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 				if item.Get("file_id").Exists() {
 					return fmt.Errorf("images[].file_id is not supported (use images[].image_url instead)")
 				}
+				if err := appendOpenAIImagesJSONImageItem(req, item); err != nil {
+					return err
+				}
+			}
+		}
+		// 兼容常见中转客户端的 image 字段（2026-08-02 线上 python 脚本循环撞 400 的形态）：
+		// 字符串 / 字符串数组 / {url|image_url} 对象，值支持 https URL、data URL 或裸 base64。
+		if image := gjson.GetBytes(body, "image"); image.Exists() {
+			items := []gjson.Result{image}
+			if image.IsArray() {
+				items = image.Array()
+			}
+			for _, item := range items {
+				if err := appendOpenAIImagesJSONImageItem(req, item); err != nil {
+					return err
+				}
 			}
 		}
 		if maskImageURL := strings.TrimSpace(gjson.GetBytes(body, "mask.image_url").String()); maskImageURL != "" {
@@ -296,14 +312,84 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 		if gjson.GetBytes(body, "mask.file_id").Exists() {
 			return fmt.Errorf("mask.file_id is not supported (use mask.image_url instead)")
 		}
-		if len(req.InputImageURLs) == 0 {
-			return fmt.Errorf("images[].image_url is required")
+		if len(req.InputImageURLs) == 0 && len(req.Uploads) == 0 {
+			return fmt.Errorf("images[].image_url is required (or send the image as base64 via the image field)")
 		}
 	}
 	req.HasNativeOptions = hasOpenAINativeImageOptions(func(path string) bool {
 		return gjson.GetBytes(body, path).Exists()
 	})
 	return nil
+}
+
+// appendOpenAIImagesJSONImageItem 收取 JSON 编辑请求里的一个图片输入项。
+// 支持 {"url": "..."} 对象与纯字符串（https/data URL 进 InputImageURLs，
+// 裸 base64 解码进 Uploads，与 multipart 上传件共用下游链路）。
+// 未识别的形态静默跳过，交由调用方末尾的必填校验兜底。
+func appendOpenAIImagesJSONImageItem(req *OpenAIImagesRequest, item gjson.Result) error {
+	if imageURL := strings.TrimSpace(item.Get("image_url").String()); imageURL != "" {
+		req.InputImageURLs = append(req.InputImageURLs, imageURL)
+		return nil
+	}
+	if imageURL := strings.TrimSpace(item.Get("url").String()); imageURL != "" {
+		req.InputImageURLs = append(req.InputImageURLs, imageURL)
+		return nil
+	}
+	if item.Type != gjson.String {
+		return nil
+	}
+	value := strings.TrimSpace(item.String())
+	if value == "" {
+		return nil
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "data:") {
+		req.InputImageURLs = append(req.InputImageURLs, value)
+		return nil
+	}
+	data, err := decodeOpenAIImagesJSONBase64(value, openAIImageMaxUploadPartSize)
+	if err != nil {
+		return err
+	}
+	req.Uploads = append(req.Uploads, OpenAIImagesUpload{
+		FieldName:   "image",
+		FileName:    "image",
+		ContentType: http.DetectContentType(data),
+		Data:        data,
+	})
+	return nil
+}
+
+// decodeOpenAIImagesJSONBase64 解码 JSON image 字段里的裸 base64 图片。
+// maxBytes 与 multipart 单个上传件上限对齐；解码后按字节嗅探，非图片内容在
+// parse 层直接拒绝，而不是转发后由上游报错。
+func decodeOpenAIImagesJSONBase64(value string, maxBytes int) ([]byte, error) {
+	compact := strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '\r', '\n':
+			return -1
+		}
+		return r
+	}, value)
+	if len(compact) > maxBytes/3*4+4 {
+		return nil, fmt.Errorf("image base64 payload exceeds %d bytes limit", maxBytes)
+	}
+	var data []byte
+	var err error
+	for _, enc := range []*base64.Encoding{
+		base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding,
+	} {
+		if data, err = enc.DecodeString(compact); err == nil {
+			break
+		}
+	}
+	if err != nil || len(data) == 0 {
+		return nil, fmt.Errorf("invalid base64 image data in image field")
+	}
+	if !strings.HasPrefix(strings.ToLower(http.DetectContentType(data)), "image/") {
+		return nil, fmt.Errorf("image field base64 payload is not a recognized image format")
+	}
+	return data, nil
 }
 
 func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *OpenAIImagesRequest) error {
