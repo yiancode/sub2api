@@ -292,3 +292,28 @@ func TestWriteOpenAIUpstreamClientError_PayloadShape(t *testing.T) {
 		})
 	}
 }
+
+// 2026-08-16 hyc9527：Grok CLI proxy 扁平信封 error 是字符串。
+// /v1/messages 兼容路径必须把原文写进 Anthropic error.message，
+// 不能再落成 "Upstream error: 400"，否则上游主站无法识别超窗。
+func TestHandleCompatErrorResponse_GrokFlatEnvelopeWritesMessage(t *testing.T) {
+	const grokBody = `{"code":"invalid-argument","error":"This model's maximum prompt length is 500000 but the request contains 500323 tokens."}`
+	const grokMsg = "This model's maximum prompt length is 500000 but the request contains 500323 tokens."
+
+	c, rec := newOpenAIUpstreamErrorTestContext(t)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformGrok, Type: AccountTypeOAuth, Name: "GrokSuper-001"}
+
+	_, err := svc.handleCompatErrorResponse(
+		newOpenAIUpstreamErrorResponse(http.StatusBadRequest, grokBody),
+		c, account, writeAnthropicError, "grok-4.5",
+	)
+
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	body := rec.Body.String()
+	require.Equal(t, "error", gjson.Get(body, "type").String())
+	require.Equal(t, "invalid_request_error", gjson.Get(body, "error.type").String())
+	require.Equal(t, grokMsg, gjson.Get(body, "error.message").String())
+	require.NotContains(t, body, "Upstream error: 400")
+}

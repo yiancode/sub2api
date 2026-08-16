@@ -298,6 +298,16 @@ func extractUpstreamErrorMessage(body []byte) string {
 		return m
 	}
 
+	// Grok / xAI CLI proxy 扁平信封（2026-08-16 hyc9527）：
+	// {"code":"invalid-argument","error":"This model's maximum prompt length is 500000 but the request contains 500323 tokens."}
+	// error 是字符串，不是 {message:...}。抽不出原文时兼容路径会写成
+	// "Upstream error: 400"，上游主站无法识别超窗、Claude Code 不会自动 /compact。
+	if errNode := gjson.GetBytes(body, "error"); errNode.Type == gjson.String {
+		if msg := strings.TrimSpace(errNode.String()); msg != "" {
+			return msg
+		}
+	}
+
 	// ChatGPT 内部 API 风格：{"detail":"..."}
 	if d := gjson.GetBytes(body, "detail").String(); strings.TrimSpace(d) != "" {
 		return d

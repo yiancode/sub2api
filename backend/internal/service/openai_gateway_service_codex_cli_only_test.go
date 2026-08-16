@@ -313,6 +313,18 @@ func TestIsOpenAIContextWindowError(t *testing.T) {
 		"context canceled",
 		nil,
 	))
+	require.True(t, isOpenAIContextWindowError(
+		"This model's maximum prompt length is 500000 but the request contains 500323 tokens.",
+		nil,
+	))
+	require.True(t, isOpenAIContextWindowError(
+		"",
+		[]byte(`{"code":"invalid-argument","error":"This model's maximum prompt length is 500000 but the request contains 500323 tokens."}`),
+	))
+	require.False(t, isOpenAIContextWindowError(
+		"Upstream error: 400",
+		nil,
+	))
 }
 
 func TestShouldFailoverOpenAIUpstreamResponseContextWindow502(t *testing.T) {
