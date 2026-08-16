@@ -6,6 +6,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDefaultRuntimeModelMappingOptionsIncludesCrossClient(t *testing.T) {
+	original := RuntimeModelMappingOptions()
+	t.Cleanup(func() { SetRuntimeModelMappingOptions(original) })
+	SetRuntimeModelMappingOptions(DefaultRuntimeModelMappingOptions())
+	mapping := DefaultModelMapping()
+	require.Equal(t, DefaultTextModel, mapping["claude-*"])
+	require.Equal(t, DefaultTextModel, mapping["gpt-*"])
+	require.True(t, RuntimeModelMappingOptions().EnableCrossClientMap)
+}
+
 func TestDefaultModelMappingExcludesCrossClientWildcards(t *testing.T) {
 	original := RuntimeModelMappingOptions()
 	t.Cleanup(func() { SetRuntimeModelMappingOptions(original) })

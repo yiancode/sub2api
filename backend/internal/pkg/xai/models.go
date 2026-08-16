@@ -11,8 +11,20 @@ var runtimeMappingOpts atomic.Value // ModelMappingOptions
 var runtimeMappingVersion atomic.Uint64
 
 func init() {
-	runtimeMappingOpts.Store(ModelMappingOptions{})
+	runtimeMappingOpts.Store(DefaultRuntimeModelMappingOptions())
 	runtimeMappingVersion.Store(1)
+}
+
+// DefaultRuntimeModelMappingOptions is the process default before settings load,
+// and the fallback when no options have been published. It matches
+// grok_cross_client_model_map_enabled's documented default (true) so Claude
+// Code / Codex keep working against Grok groups after a restart, even if
+// nobody has opened the admin settings page yet.
+func DefaultRuntimeModelMappingOptions() ModelMappingOptions {
+	return ModelMappingOptions{
+		DefaultText:          DefaultTextModel,
+		EnableCrossClientMap: true,
+	}
 }
 
 // SetRuntimeModelMappingOptions updates process-wide defaults used by
@@ -35,7 +47,7 @@ func RuntimeModelMappingOptions() ModelMappingOptions {
 			return opts
 		}
 	}
-	return ModelMappingOptions{}
+	return DefaultRuntimeModelMappingOptions()
 }
 
 // Model describes an xAI model in OpenAI-compatible /models shape.
@@ -63,8 +75,8 @@ const (
 )
 
 // ModelMappingOptions controls optional expansions of the default mapping.
-// Cross-client wildcards (gpt-*/claude-*) default ON via settings
-// grok_cross_client_model_map_enabled so Codex/Claude clients keep working
+// Cross-client wildcards (gpt-*/claude-*) default ON (process init + settings
+// grok_cross_client_model_map_enabled) so Codex/Claude clients keep working
 // against Grok groups (map to DefaultText / grok-4.5). Operators may disable.
 type ModelMappingOptions struct {
 	// DefaultText is the target for empty models and optional cross-client maps.
