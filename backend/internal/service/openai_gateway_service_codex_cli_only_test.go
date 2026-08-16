@@ -325,6 +325,14 @@ func TestIsOpenAIContextWindowError(t *testing.T) {
 		"Upstream error: 400",
 		nil,
 	))
+	require.True(t, isOpenAIContextWindowError(
+		"Failed to start sampling: [input_too_large] Current message (503125 tokens) exceeds budget (475424 tokens)",
+		nil,
+	))
+	require.False(t, isOpenAIContextWindowError(
+		"your spending exceeds budget for this billing period",
+		nil,
+	))
 }
 
 func TestShouldFailoverOpenAIUpstreamResponseContextWindow502(t *testing.T) {

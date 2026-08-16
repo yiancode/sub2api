@@ -179,6 +179,12 @@ func isOpenAIContextWindowError(upstreamMsg string, upstreamBody []byte) bool {
 		if strings.Contains(lower, "maximum prompt length") {
 			return true
 		}
+		if strings.Contains(lower, "input_too_large") {
+			return true
+		}
+		if strings.Contains(lower, "exceeds budget") && strings.Contains(lower, "token") {
+			return true
+		}
 		hasExceeded := strings.Contains(lower, "exceed") || strings.Contains(lower, "too large") || strings.Contains(lower, "too long")
 		if strings.Contains(lower, "context window") && hasExceeded {
 			return true
