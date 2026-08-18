@@ -454,3 +454,27 @@ func TestGatewayRoutesOpenAICountTokensPathIsRegistered(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.NotEqual(t, http.StatusNotFound, w.Code)
 }
+
+// CN 供应商无兼容 count_tokens 上游端点：必须走本地估算，不得进入选号。
+// 测试路由只注入空 OpenAIGatewayHandler；若误走 CountTokens，缺依赖会 503。
+func TestGatewayRoutesCNCountTokensUsesLocalEstimate(t *testing.T) {
+	body := `{"model":"kimi-k2.5","messages":[{"role":"user","content":"hi"}]}`
+	for _, platform := range []string{service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek} {
+		t.Run(platform, func(t *testing.T) {
+			router := newGatewayRoutesTestRouterWithConfig(&config.Config{
+				Gateway: config.GatewayConfig{MaxBodySize: 1024 * 1024},
+			}, platform)
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, "platform=%s", platform)
+			var response struct {
+				InputTokens int `json:"input_tokens"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response), "platform=%s", platform)
+			require.Positive(t, response.InputTokens, "platform=%s", platform)
+		})
+	}
+}

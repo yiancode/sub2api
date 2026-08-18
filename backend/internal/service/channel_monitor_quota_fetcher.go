@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -325,11 +326,13 @@ func (f *ChannelMonitorQuotaFetcher) fetchCNQuota(ctx context.Context, accountID
 	}
 	result, err := f.cnQuota.QueryUsage(ctx, accountID)
 	if err != nil {
+		// QueryUsage 的 error 是配置/网络/策略问题（含内部 403 URL 拒绝），
+		// 不是上游鉴权失败。凭据判定只看带 StatusCode 的结构化结果。
 		msg := truncateMessage(sanitizeErrorMessage(err.Error()))
 		return &domain.MonitorQuotaSnapshot{
 			Source:            "cn_quota",
 			Success:           false,
-			CredentialInvalid: isCredentialErrorMessage(msg),
+			CredentialInvalid: false,
 			Error:             msg,
 			FetchedAt:         now,
 		}
@@ -341,7 +344,7 @@ func (f *ChannelMonitorQuotaFetcher) fetchCNQuota(ctx context.Context, accountID
 		Error:     result.Error,
 		FetchedAt: now,
 	}
-	if !result.Success && !result.CredentialValid {
+	if cnQuotaProbeIndicatesCredentialInvalid(result) {
 		snapshot.CredentialInvalid = true
 	}
 	if len(result.Tiers) > 0 {
@@ -412,6 +415,19 @@ func quotaErrorSnapshot(source, message string, now time.Time) *domain.MonitorQu
 		Error:     truncateMessage(sanitizeErrorMessage(message)),
 		FetchedAt: now,
 	}
+}
+
+// cnQuotaProbeIndicatesCredentialInvalid 只在探测层确认 401/403 时为 true。
+// CredentialValid 的零值是 false，不能把它当成「已确认凭据失效」。
+func cnQuotaProbeIndicatesCredentialInvalid(result *CNProviderQuotaProbeResult) bool {
+	if result == nil || result.Success {
+		return false
+	}
+	switch result.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return true
+	}
+	return false
 }
 
 // isCredentialErrorMessage 上游 401/403 鉴权失败的启发式识别

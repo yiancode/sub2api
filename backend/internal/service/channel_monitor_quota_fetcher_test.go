@@ -285,13 +285,86 @@ func TestQuotaFetcher_CNQuotaCredentialInvalidFlagPropagates(t *testing.T) {
 		Platform:    domain.PlatformZhipu,
 		Credentials: map[string]any{"account_mode": AccountModeCoding},
 	}
-	cnQuota.result = &CNProviderQuotaProbeResult{Success: false, CredentialValid: false, Error: "api key expired"}
+	cnQuota.result = &CNProviderQuotaProbeResult{
+		Success:         false,
+		CredentialValid: false,
+		StatusCode:      401,
+		Error:           "Authentication failed (HTTP 401)",
+	}
 
 	snapshot := fetcher.Fetch(context.Background(), 5)
 
 	require.False(t, snapshot.Success)
 	require.True(t, snapshot.CredentialInvalid)
-	require.Equal(t, "api key expired", snapshot.Error)
+	require.Equal(t, "Authentication failed (HTTP 401)", snapshot.Error)
+	require.Equal(t, MonitorStatusFailed, deriveQuotaCheckResult(snapshot, "quota", time.Now()).Status)
+}
+
+// CredentialValid 零值是 false，不能把 5xx / 解析失败当成凭据失效。
+func TestQuotaFetcher_CNQuotaTransientFailureIsNotCredentialInvalid(t *testing.T) {
+	fetcher, _, cnQuota, _, accounts := newQuotaFetcherTestSetup(t)
+	accounts.accounts[8] = &Account{
+		ID:          8,
+		Platform:    domain.PlatformKimi,
+		Credentials: map[string]any{"account_mode": AccountModeCoding},
+	}
+
+	cases := []struct {
+		name   string
+		result *CNProviderQuotaProbeResult
+	}{
+		{
+			name: "http_502_zero_value_credential_valid",
+			result: &CNProviderQuotaProbeResult{
+				Success:    false,
+				StatusCode: 502,
+				Error:      "API error (HTTP 502): upstream unavailable",
+			},
+		},
+		{
+			name: "http_500_explicit_credential_valid",
+			result: &CNProviderQuotaProbeResult{
+				Success:         false,
+				CredentialValid: true,
+				StatusCode:      500,
+				Error:           "API error (HTTP 500): boom",
+			},
+		},
+		{
+			name: "zhipu_business_error_no_status",
+			result: &CNProviderQuotaProbeResult{
+				Success:         false,
+				CredentialValid: true,
+				Error:           "API error: unknown zhipu quota error",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fetcher.cache = make(map[int64]monitorQuotaCacheEntry)
+			cnQuota.result = tc.result
+			snapshot := fetcher.Fetch(context.Background(), 8)
+			require.False(t, snapshot.Success)
+			require.False(t, snapshot.CredentialInvalid)
+			require.Equal(t, MonitorStatusError, deriveQuotaCheckResult(snapshot, "quota", time.Now()).Status)
+		})
+	}
+}
+
+func TestQuotaFetcher_CNQuotaQueryErrorIsNotCredentialInvalid(t *testing.T) {
+	fetcher, _, cnQuota, _, accounts := newQuotaFetcherTestSetup(t)
+	accounts.accounts[8] = &Account{
+		ID:          8,
+		Platform:    domain.PlatformKimi,
+		Credentials: map[string]any{"account_mode": AccountModeCoding},
+	}
+	cnQuota.err = errors.New(`error: code=403 reason="CN_QUOTA_URL_REJECTED" message="probe target rejected by URL security policy"`)
+
+	snapshot := fetcher.Fetch(context.Background(), 8)
+
+	require.False(t, snapshot.Success)
+	require.False(t, snapshot.CredentialInvalid)
+	require.Equal(t, MonitorStatusError, deriveQuotaCheckResult(snapshot, "quota", time.Now()).Status)
 }
 
 func TestQuotaFetcher_CNBalanceHTTP403MarksCredentialInvalid(t *testing.T) {

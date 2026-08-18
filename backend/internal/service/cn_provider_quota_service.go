@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,7 +54,7 @@ type CNProviderQuotaProbeResult struct {
 	Provider        string        `json:"provider"`
 	Source          string        `json:"source"`
 	Success         bool          `json:"success"`
-	CredentialValid bool          `json:"credential_valid"` // false = 401/403 鉴权失败
+	CredentialValid bool          `json:"credential_valid"` // 仅 401/403 为 false；其它失败为 true（零值不可当作已确认失效）
 	Tiers           []CNQuotaTier `json:"tiers,omitempty"`
 	PlanLevel       string        `json:"plan_level,omitempty"` // 智谱套餐等级
 	StatusCode      int           `json:"status_code,omitempty"`
@@ -120,7 +121,10 @@ func (s *CNProviderQuotaService) queryUsage(ctx context.Context, accountID int64
 		return nil, err
 	}
 
-	provider := account.GetCodingPlanProvider()
+	provider := account.Platform
+	if provider != PlatformKimi && provider != PlatformZhipu {
+		provider = account.GetCodingPlanProvider()
+	}
 	if provider != PlatformKimi && provider != PlatformZhipu {
 		return nil, infraerrors.New(http.StatusBadRequest, "CN_QUOTA_NOT_CODING_PLAN", "account is not a kimi/zhipu coding plan account")
 	}
@@ -185,10 +189,13 @@ func (s *CNProviderQuotaService) queryUsage(ctx context.Context, accountID int64
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		// 鉴权失败：不落快照（不覆盖之前的有效值），仅返回失败结果供前端提示。
+		result.CredentialValid = false
 		result.Error = fmt.Sprintf("Authentication failed (HTTP %d)", resp.StatusCode)
 		return result, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// 瞬时/上游故障：凭据未判定为失效，监控应显示 error 而不是 failed。
+		result.CredentialValid = true
 		result.Error = fmt.Sprintf("API error (HTTP %d): %s", resp.StatusCode, truncate(strings.TrimSpace(string(bodyBytes)), 240))
 		return result, nil
 	}
@@ -200,6 +207,7 @@ func (s *CNProviderQuotaService) queryUsage(ctx context.Context, accountID int64
 			if msg == "" {
 				msg = "unknown zhipu quota error"
 			}
+			result.CredentialValid = true
 			result.Error = "API error: " + msg
 			return result, nil
 		}
@@ -275,14 +283,27 @@ func kimiQuotaURL(baseURL string) string {
 }
 
 func zhipuQuotaHost(baseURL string) string {
-	switch u := strings.ToLower(baseURL); {
-	case strings.Contains(u, "bigmodel.cn"):
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
 		return "https://open.bigmodel.cn"
-	case strings.Contains(u, "z.ai"):
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || strings.TrimSpace(parsed.Host) == "" {
+		return ""
+	}
+	// 只匹配 hostname，避免 path / 邻近域名（如 /open.bigmodel.cn、buzz.ai）被改写到官网。
+	host := strings.ToLower(parsed.Hostname())
+	switch {
+	case host == "bigmodel.cn" || strings.HasSuffix(host, ".bigmodel.cn"):
+		return "https://open.bigmodel.cn"
+	case host == "z.ai" || strings.HasSuffix(host, ".z.ai"):
 		return "https://api.z.ai"
 	default:
-		// 国产优先：未知域名回落国内站（与前端 zhipu 预设一致）。
-		return "https://open.bigmodel.cn"
+		scheme := strings.TrimSpace(parsed.Scheme)
+		if scheme == "" {
+			scheme = "https"
+		}
+		return scheme + "://" + parsed.Host
 	}
 }
 

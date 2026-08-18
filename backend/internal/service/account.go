@@ -1442,12 +1442,16 @@ func (a *Account) GetCNAPIKey() string {
 	return a.GetCredential("api_key")
 }
 
-// GetCodingPlanProvider 根据 base_url 识别 Coding Plan 供应商（kimi / zhipu），
-// 用于路由到对应的额度查询端点。非 coding 模式或无法识别时返回空串。
-// 判定规则与 cc-switch coding_plan.rs::detect_provider 保持一致。
+// GetCodingPlanProvider 识别 Coding Plan 供应商（kimi / zhipu）。
+// 优先用账号 Platform（自定义/中转 base_url 也要能探测）；官方域名再作回退。
+// 非 coding 模式或无法识别时返回空串。
 func (a *Account) GetCodingPlanProvider() string {
 	if a == nil || a.GetAccountMode() != AccountModeCoding {
 		return ""
+	}
+	switch a.Platform {
+	case PlatformKimi, PlatformZhipu:
+		return a.Platform
 	}
 	baseURL := strings.ToLower(a.GetOpenAIBaseURL())
 	switch {

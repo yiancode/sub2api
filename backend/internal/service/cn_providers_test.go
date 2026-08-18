@@ -55,9 +55,9 @@ func TestCNMillisToRFC3339(t *testing.T) {
 	t.Parallel()
 	// 1700000000 秒 = 1700000000000 毫秒
 	want := time.UnixMilli(1700000000000).UTC().Format(time.RFC3339)
-	require.Equal(t, want, cnMillisToRFC3339(1700000000))      // 秒级
-	require.Equal(t, want, cnMillisToRFC3339(1700000000000))   // 毫秒级
-	require.Equal(t, "", cnMillisToRFC3339(0))                 // 非正
+	require.Equal(t, want, cnMillisToRFC3339(1700000000))    // 秒级
+	require.Equal(t, want, cnMillisToRFC3339(1700000000000)) // 毫秒级
+	require.Equal(t, "", cnMillisToRFC3339(0))               // 非正
 	require.Equal(t, "", cnMillisToRFC3339(-1))
 }
 
@@ -210,13 +210,31 @@ func TestCNBalanceLowReason(t *testing.T) {
 	require.True(t, len(cnBalanceLowReason("")) > len(cnBalanceLowReasonPrefix))
 }
 
-// TestZhipuQuotaHost 按域名路由智谱额度端点主机（bigmodel.cn / z.ai / 默认国内站）。
+func TestGetCodingPlanProvider_CustomBaseURLUsesAccountPlatform(t *testing.T) {
+	t.Parallel()
+	account := &Account{
+		Platform:    PlatformZhipu,
+		Credentials: map[string]any{"account_mode": AccountModeCoding, "base_url": "https://relay.example.com/api/paas/v4"},
+	}
+	require.Equal(t, PlatformZhipu, account.GetCodingPlanProvider())
+}
+
+// TestZhipuQuotaHost 官方域名做路径规范化；自定义/中转主机必须跟 base_url 同主机，
+// 禁止把未知主机改写成 open.bigmodel.cn（会把中转 key 发到官网）。
 func TestZhipuQuotaHost(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, "https://open.bigmodel.cn", zhipuQuotaHost("https://open.bigmodel.cn/api/paas/v4"))
 	require.Equal(t, "https://api.z.ai", zhipuQuotaHost("https://api.z.ai/api/paas/v4"))
-	require.Equal(t, "https://open.bigmodel.cn", zhipuQuotaHost("https://custom.example.com")) // 默认国内站
+	require.Equal(t, "https://open.bigmodel.cn", zhipuQuotaHost(""))
+	require.Equal(t, "https://custom.example.com", zhipuQuotaHost("https://custom.example.com"))
+	require.Equal(t, "https://custom.example.com", zhipuQuotaHost("https://custom.example.com/api/paas/v4"))
+	require.Equal(t, "https://relay.example.com:8443", zhipuQuotaHost("https://relay.example.com:8443/zhipu"))
+	require.Equal(t, "https://relay.example.com", zhipuQuotaHost("https://relay.example.com/open.bigmodel.cn/api/paas/v4"))
+	require.Equal(t, "https://gateway.example.com", zhipuQuotaHost("https://gateway.example.com/z.ai/v4"))
+	require.Equal(t, "https://notbigmodel.cn", zhipuQuotaHost("https://notbigmodel.cn/api/paas/v4"))
+	require.Equal(t, "https://buzz.ai", zhipuQuotaHost("https://buzz.ai/v4"))
 	require.Equal(t, "https://open.bigmodel.cn/api/monitor/usage/quota/limit", zhipuQuotaURL("https://open.bigmodel.cn/api/paas/v4"))
+	require.Equal(t, "https://custom.example.com/api/monitor/usage/quota/limit", zhipuQuotaURL("https://custom.example.com/api/paas/v4"))
 }
 
 // TestKimiQuotaURL 两种协议默认 base（coding/v1 与 coding）都归一到 /coding/v1/usages
@@ -294,8 +312,8 @@ func TestEvaluateAccountSchedulingThreshold_KimiCodingPlan(t *testing.T) {
 	account := &Account{
 		Platform: PlatformKimi,
 		Extra: map[string]any{
-			"kimi_5h_used_percent": 90.0,
-			"kimi_5h_reset_at":     reset.Format(time.RFC3339),
+			"kimi_5h_used_percent":     90.0,
+			"kimi_5h_reset_at":         reset.Format(time.RFC3339),
 			"kimi_weekly_used_percent": 30.0,
 			"kimi_weekly_reset_at":     now.Add(7 * 24 * time.Hour).Format(time.RFC3339),
 		},
@@ -410,9 +428,9 @@ func TestGetOpenAIProtocolAPIKey_CNProviders(t *testing.T) {
 	t.Parallel()
 
 	kimi := &Account{
-		Platform:     PlatformKimi,
-		Type:         AccountTypeAPIKey,
-		Credentials:  map[string]any{"api_key": "sk-kimi"},
+		Platform:    PlatformKimi,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-kimi"},
 	}
 	require.Equal(t, "sk-kimi", kimi.GetOpenAIProtocolAPIKey())
 	require.False(t, kimi.IsOpenAIApiKey(), "IsOpenAIApiKey stays openai-only for scheduling gates")

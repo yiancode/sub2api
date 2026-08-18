@@ -72,6 +72,10 @@ func (r *fakeCNProbeAccountRepo) GetByID(ctx context.Context, id int64) (*Accoun
 	return r.account, nil
 }
 
+func (r *fakeCNProbeAccountRepo) UpdateExtra(ctx context.Context, id int64, extra map[string]any) error {
+	return nil
+}
+
 // kimi coding 账号的 base_url 指向中转（含 api.kimi.com/coding 路径段即可被识别
 // 为 kimi coding plan）→ 衍生额度端点落在中转主机上，白名单未列名必须拒绝。
 func TestCNProviderQuotaService_RejectsURLBlockedByPolicy(t *testing.T) {

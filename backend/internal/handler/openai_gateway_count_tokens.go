@@ -14,8 +14,10 @@ import (
 )
 
 // GrokCountTokens handles Anthropic-compatible count_tokens requests locally.
-// The route middleware already authenticates the API key and resolves the
-// group; this handler intentionally does not select an account or check billing.
+// Used by Grok and CN provider groups (kimi/zhipu/deepseek): none expose a
+// compatible upstream count_tokens endpoint. The route middleware already
+// authenticates the API key and resolves the group; this handler does not
+// select an account or check billing.
 func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
