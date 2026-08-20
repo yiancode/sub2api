@@ -361,6 +361,9 @@ func (f *ChannelMonitorQuotaFetcher) fetchCNQuota(ctx context.Context, account *
 			FetchedAt:         now,
 		}
 	}
+	if result == nil {
+		return quotaErrorSnapshot("cn_quota", "cn quota service returned no data", now)
+	}
 	snapshot := &domain.MonitorQuotaSnapshot{
 		Source:    "cn_quota",
 		Success:   result.Success,
@@ -397,14 +400,19 @@ func (f *ChannelMonitorQuotaFetcher) fetchCNBalance(ctx context.Context, account
 	}
 	result, err := f.cnBalance.QueryBalanceForAccount(ctx, account)
 	if err != nil {
+		// QueryBalance 的 error 是配置/网络/策略问题（含内部 403 URL 拒绝），
+		// 不是上游鉴权失败。凭据判定只看带 StatusCode 的结构化结果。
 		msg := truncateMessage(sanitizeErrorMessage(err.Error()))
 		return &domain.MonitorQuotaSnapshot{
 			Source:            "cn_balance",
 			Success:           false,
-			CredentialInvalid: isCredentialErrorMessage(msg),
+			CredentialInvalid: false,
 			Error:             msg,
 			FetchedAt:         now,
 		}
+	}
+	if result == nil {
+		return quotaErrorSnapshot("cn_balance", "cn balance service returned no data", now)
 	}
 	snapshot := &domain.MonitorQuotaSnapshot{
 		Source:    "cn_balance",
