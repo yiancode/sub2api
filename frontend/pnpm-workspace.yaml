@@ -4,6 +4,8 @@ overrides:
   # Pin past GHSA-r28c-9q8g-f849 / GHSA-6g55-p6wh-862q (>=8.5.18).
   # 8.5.23 is still inside pnpm 11's default minimumReleaseAge window.
   postcss: 8.5.22
+  # Pin past sanitizer-bypass XSS advisories (GHSA from upstream v0.1.181).
+  'dompurify@<3.4.14': '>=3.4.14'
 
 # Dependencies whose lifecycle scripts are required by the production build.
 allowBuilds:
