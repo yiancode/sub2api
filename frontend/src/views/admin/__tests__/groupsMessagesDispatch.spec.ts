@@ -9,19 +9,29 @@ import {
 } from "../groupsMessagesDispatch";
 
 describe("groupsMessagesDispatch", () => {
-  it("supports OpenAI and composite groups", () => {
+  it("supports OpenAI, all-platform, and composite groups", () => {
     expect(supportsMessagesDispatchPlatform("openai")).toBe(true);
+    expect(supportsMessagesDispatchPlatform("all")).toBe(true);
     expect(supportsMessagesDispatchPlatform("composite")).toBe(true);
     expect(supportsMessagesDispatchPlatform("anthropic")).toBe(false);
   });
 
-  it("returns the expected default form state", () => {
+  it("returns Sol/Luna defaults plus 1M Claude exact mappings", () => {
     expect(createDefaultMessagesDispatchFormState()).toEqual({
       allow_messages_dispatch: false,
-      opus_mapped_model: "gpt-5.4",
-      sonnet_mapped_model: "gpt-5.3-codex",
-      haiku_mapped_model: "gpt-5.4-mini",
-      exact_model_mappings: [],
+      opus_mapped_model: "gpt-5.6-sol",
+      sonnet_mapped_model: "gpt-5.6-sol",
+      haiku_mapped_model: "gpt-5.6-luna",
+      exact_model_mappings: [
+        { claude_model: "claude-fable-5", target_model: "gpt-5.6-sol" },
+        { claude_model: "claude-sonnet-5", target_model: "gpt-5.6-sol" },
+        { claude_model: "claude-opus-5", target_model: "gpt-5.6-sol" },
+        { claude_model: "claude-opus-4-8", target_model: "gpt-5.6-sol" },
+        { claude_model: "claude-opus-4-7", target_model: "gpt-5.6-sol" },
+        { claude_model: "claude-opus-4-6", target_model: "gpt-5.6-sol" },
+        { claude_model: "claude-sonnet-4-6", target_model: "gpt-5.6-sol" },
+        { claude_model: "claude-haiku-4-5", target_model: "gpt-5.6-luna" },
+      ],
     });
   });
 
@@ -90,12 +100,6 @@ describe("groupsMessagesDispatch", () => {
 
     resetMessagesDispatchFormState(state);
 
-    expect(state).toEqual({
-      allow_messages_dispatch: false,
-      opus_mapped_model: "gpt-5.4",
-      sonnet_mapped_model: "gpt-5.3-codex",
-      haiku_mapped_model: "gpt-5.4-mini",
-      exact_model_mappings: [],
-    });
+    expect(state).toEqual(createDefaultMessagesDispatchFormState());
   });
 });

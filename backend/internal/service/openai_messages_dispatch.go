@@ -6,10 +6,12 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
+// OpenAI Messages Dispatch defaults: 1M Claude → Sol; Haiku → Luna.
+// Live group mappings live in PostgreSQL; these only apply when family fields are empty.
 const (
-	defaultOpenAIMessagesDispatchOpusMappedModel   = "gpt-5.4"
-	defaultOpenAIMessagesDispatchSonnetMappedModel = "gpt-5.3-codex"
-	defaultOpenAIMessagesDispatchHaikuMappedModel  = "gpt-5.4-mini"
+	defaultOpenAIMessagesDispatchOpusMappedModel   = "gpt-5.6-sol"
+	defaultOpenAIMessagesDispatchSonnetMappedModel = "gpt-5.6-sol"
+	defaultOpenAIMessagesDispatchHaikuMappedModel  = "gpt-5.6-luna"
 )
 
 func normalizeOpenAIMessagesDispatchMappedModel(model string) string {

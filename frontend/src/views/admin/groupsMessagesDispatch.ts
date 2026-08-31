@@ -13,17 +13,33 @@ export interface MessagesDispatchFormState {
   exact_model_mappings: MessagesDispatchMappingRow[];
 }
 
+const defaultSolModel = "gpt-5.6-sol";
+const defaultLunaModel = "gpt-5.6-luna";
+
+export function defaultMessagesDispatchExactMappings(): MessagesDispatchMappingRow[] {
+  return [
+    { claude_model: "claude-fable-5", target_model: defaultSolModel },
+    { claude_model: "claude-sonnet-5", target_model: defaultSolModel },
+    { claude_model: "claude-opus-5", target_model: defaultSolModel },
+    { claude_model: "claude-opus-4-8", target_model: defaultSolModel },
+    { claude_model: "claude-opus-4-7", target_model: defaultSolModel },
+    { claude_model: "claude-opus-4-6", target_model: defaultSolModel },
+    { claude_model: "claude-sonnet-4-6", target_model: defaultSolModel },
+    { claude_model: "claude-haiku-4-5", target_model: defaultLunaModel },
+  ];
+}
+
 export function supportsMessagesDispatchPlatform(platform: string): boolean {
-  return platform === "openai" || platform === "composite";
+  return platform === "openai" || platform === "all" || platform === "composite";
 }
 
 export function createDefaultMessagesDispatchFormState(): MessagesDispatchFormState {
   return {
     allow_messages_dispatch: false,
-    opus_mapped_model: "gpt-5.4",
-    sonnet_mapped_model: "gpt-5.3-codex",
-    haiku_mapped_model: "gpt-5.4-mini",
-    exact_model_mappings: [],
+    opus_mapped_model: defaultSolModel,
+    sonnet_mapped_model: defaultSolModel,
+    haiku_mapped_model: defaultLunaModel,
+    exact_model_mappings: defaultMessagesDispatchExactMappings(),
   };
 }
 
@@ -72,5 +88,5 @@ export function resetMessagesDispatchFormState(
   target.opus_mapped_model = defaults.opus_mapped_model;
   target.sonnet_mapped_model = defaults.sonnet_mapped_model;
   target.haiku_mapped_model = defaults.haiku_mapped_model;
-  target.exact_model_mappings = [];
+  target.exact_model_mappings = defaults.exact_model_mappings;
 }
