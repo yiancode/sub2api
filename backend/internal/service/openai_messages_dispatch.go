@@ -6,8 +6,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
-// OpenAI Messages Dispatch defaults: 1M Claude → Sol; Haiku → Luna.
-// Live group mappings live in PostgreSQL; these only apply when family fields are empty.
+// Empty-family fallbacks used when the matching group field is unset.
 const (
 	defaultOpenAIMessagesDispatchOpusMappedModel   = "gpt-5.6-sol"
 	defaultOpenAIMessagesDispatchSonnetMappedModel = "gpt-5.6-sol"
@@ -50,7 +49,7 @@ func claudeMessagesDispatchFamily(model string) string {
 		return ""
 	}
 	switch {
-	case strings.Contains(normalized, "opus"):
+	case strings.Contains(normalized, "opus"), strings.Contains(normalized, "fable"):
 		return "opus"
 	case strings.Contains(normalized, "sonnet"):
 		return "sonnet"

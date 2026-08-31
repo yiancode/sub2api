@@ -29,6 +29,37 @@ func TestNormalizeOpenAIMessagesDispatchModelConfig(t *testing.T) {
 	}, cfg.ExactModelMappings)
 }
 
+func TestGroupResolveMessagesDispatchModel_EmptyOpenAIConfigMapsFableToSol(t *testing.T) {
+	t.Parallel()
+
+	group := &Group{Platform: PlatformOpenAI}
+
+	require.Equal(t, "gpt-5.6-sol", group.ResolveMessagesDispatchModel("claude-fable-5"))
+	require.Equal(t, "gpt-5.6-sol", group.ResolveMessagesDispatchModel("claude-fable-5-20260301"))
+	require.Equal(t, "gpt-5.6-sol", group.ResolveMessagesDispatchModel("claude-opus-4-8"))
+	require.Equal(t, "gpt-5.6-sol", group.ResolveMessagesDispatchModel("claude-sonnet-5"))
+	require.Equal(t, "gpt-5.6-luna", group.ResolveMessagesDispatchModel("claude-haiku-4-5"))
+	require.Empty(t, group.ResolveMessagesDispatchModel("gpt-5.6-sol"))
+}
+
+func TestGroupResolveMessagesDispatchModel_ExactMappingBeatsFableFamilyDefault(t *testing.T) {
+	t.Parallel()
+
+	group := &Group{
+		Platform: PlatformOpenAI,
+		MessagesDispatchModelConfig: OpenAIMessagesDispatchModelConfig{
+			OpusMappedModel: "gpt-5.6-terra",
+			ExactModelMappings: map[string]string{
+				"claude-fable-5": "gpt-5.6-sol",
+			},
+		},
+	}
+
+	require.Equal(t, "gpt-5.6-sol", group.ResolveMessagesDispatchModel("claude-fable-5"))
+	require.Equal(t, "gpt-5.6-terra", group.ResolveMessagesDispatchModel("claude-fable-5-20260301"))
+	require.Equal(t, "gpt-5.6-terra", group.ResolveMessagesDispatchModel("claude-opus-4-8"))
+}
+
 func TestGroupResolveMessagesDispatchModel_GrokRequiresCrossClientMapping(t *testing.T) {
 	original := xai.RuntimeModelMappingOptions()
 	t.Cleanup(func() { xai.SetRuntimeModelMappingOptions(original) })
@@ -44,6 +75,7 @@ func TestGroupResolveMessagesDispatchModel_GrokRequiresCrossClientMapping(t *tes
 	require.Equal(t, "grok-build-0.1", group.ResolveMessagesDispatchModel("claude-sonnet-4-5"))
 	require.Equal(t, "grok-build-0.1", group.ResolveMessagesDispatchModel("claude-opus-4-6"))
 	require.Equal(t, "grok-build-0.1", group.ResolveMessagesDispatchModel("claude-haiku-4-5"))
+	require.Equal(t, "grok-build-0.1", group.ResolveMessagesDispatchModel("claude-fable-5"))
 	require.Empty(t, group.ResolveMessagesDispatchModel("grok"))
 	require.Empty(t, group.ResolveMessagesDispatchModel("gpt-5.3-codex"))
 }

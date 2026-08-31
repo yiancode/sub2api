@@ -30,7 +30,7 @@ export function defaultMessagesDispatchExactMappings(): MessagesDispatchMappingR
 }
 
 export function supportsMessagesDispatchPlatform(platform: string): boolean {
-  return platform === "openai" || platform === "all" || platform === "composite";
+  return platform === "openai" || platform === "composite";
 }
 
 export function createDefaultMessagesDispatchFormState(): MessagesDispatchFormState {

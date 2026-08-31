@@ -4470,6 +4470,7 @@ import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
 import { getPersistedPageSize } from "@/composables/usePersistedPageSize";
 import {
   createDefaultMessagesDispatchFormState,
+  defaultMessagesDispatchExactMappings,
   messagesDispatchConfigToFormState,
   messagesDispatchFormStateToConfig,
   resetMessagesDispatchFormState,
@@ -5090,7 +5091,7 @@ const createForm = reactive({
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: createMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: createMessagesDispatchDefaults.haiku_mapped_model,
-  exact_model_mappings: [] as MessagesDispatchMappingRow[],
+  exact_model_mappings: defaultMessagesDispatchExactMappings(),
   // 账号过滤控制（OpenAI/Antigravity 平台）
   require_oauth_only: false,
   require_privacy_set: false,
@@ -5452,7 +5453,7 @@ const editForm = reactive({
   opus_mapped_model: editMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: editMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: editMessagesDispatchDefaults.haiku_mapped_model,
-  exact_model_mappings: [] as MessagesDispatchMappingRow[],
+  exact_model_mappings: defaultMessagesDispatchExactMappings(),
   // 账号过滤控制（OpenAI/Antigravity 平台）
   require_oauth_only: false,
   require_privacy_set: false,

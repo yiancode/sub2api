@@ -73,6 +73,66 @@ func TestGoogleAPIKeyAuthMarksLookupBulkheadRejection(t *testing.T) {
 	require.Equal(t, IngressRejectAPIKeyAuthOverloaded, reason)
 }
 
+func TestGoogleAPIKeyAuthRejectsRestrictedPublicGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	group := &service.Group{
+		ID:          303,
+		Name:        "public",
+		Status:      service.StatusActive,
+		IsExclusive: false,
+		Hydrated:    true,
+	}
+	user := &service.User{
+		ID:                   8,
+		Role:                 service.RoleUser,
+		Status:               service.StatusActive,
+		Balance:              10,
+		Concurrency:          3,
+		AllowedGroups:        []int64{},
+		RestrictPublicGroups: true,
+	}
+	apiKey := &service.APIKey{
+		ID:     101,
+		UserID: user.ID,
+		Key:    "public-key",
+		Status: service.StatusActive,
+		User:   user,
+		Group:  group,
+	}
+	apiKey.GroupID = &group.ID
+
+	repo := fakeAPIKeyRepo{getByKey: func(_ context.Context, key string) (*service.APIKey, error) {
+		if key != apiKey.Key {
+			return nil, service.ErrAPIKeyNotFound
+		}
+		clone := *apiKey
+		return &clone, nil
+	}}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+	r := gin.New()
+	var reason IngressRejectReason
+	var rejected bool
+	r.Use(func(c *gin.Context) {
+		c.Next()
+		reason, rejected = GetIngressRejectReason(c)
+	})
+	r.Use(APIKeyAuthGoogle(svc, cfg))
+	r.GET("/v1beta/models", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
+	req.Header.Set("x-goog-api-key", apiKey.Key)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.True(t, rejected)
+	require.Equal(t, IngressRejectGroupNotAllowed, reason)
+	require.Contains(t, w.Body.String(), APIKeyGroupNotAllowedMessage)
+	require.NotContains(t, w.Body.String(), "专属分组")
+}
+
 type fakeAPIKeyRepo struct {
 	getByKey       func(ctx context.Context, key string) (*service.APIKey, error)
 	updateLastUsed func(ctx context.Context, id int64, usedAt time.Time) error
