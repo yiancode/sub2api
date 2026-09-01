@@ -432,7 +432,7 @@ func TestBuildCodexModelsManifestAdvertisesPriorityServiceTierForFastGPTModels(t
 	t.Parallel()
 
 	body, err := BuildCodexModelsManifest([]string{
-		"gpt-5.4-mini",
+		"gpt-5.4",
 		"gpt-5.5",
 		"gpt-5.6-sol",
 	})
@@ -448,6 +448,57 @@ func TestBuildCodexModelsManifestAdvertisesPriorityServiceTierForFastGPTModels(t
 				"description": "Priority processing for lower latency.",
 			},
 		}, model["service_tiers"])
+		require.Nil(t, model["default_service_tier"])
+	}
+}
+
+func TestConfiguredCodexSupportsPriorityServiceTier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		model string
+		want  bool
+	}{
+		{model: "gpt-5.4", want: true},
+		{model: "gpt-5.5", want: true},
+		{model: "gpt-5.6-sol", want: true},
+		{model: "gpt-5.6-terra", want: true},
+		{model: "gpt-5.6-luna", want: true},
+		{model: "openai/gpt-5.5", want: true},
+		{model: "gpt-5.6-max", want: true},
+		{model: "gpt-5", want: true},
+		{model: "gpt-5.5-pro", want: false},
+		{model: "gpt-5.5-pro-2026-03-01", want: false},
+		{model: "openai/gpt-5.5-pro", want: false},
+		{model: "gpt-5.4-mini", want: false},
+		{model: "gpt-5.4-mini-high", want: false},
+		{model: "gpt-5.4-mini-2026-03-01", want: false},
+		{model: "gpt-5.4-nano", want: false},
+		{model: "gpt-4o", want: false},
+		{model: "claude-opus-4-6", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			require.Equal(t, tt.want, configuredCodexSupportsPriorityServiceTier(tt.model))
+		})
+	}
+}
+
+// Scenario: 计费侧不提供 Fast 的 GPT 型号不得在目录里挂 priority。
+func TestBuildCodexModelsManifestLeavesServiceTiersEmptyForNonFastGPTModels(t *testing.T) {
+	t.Parallel()
+
+	body, err := BuildCodexModelsManifest([]string{
+		"gpt-5.5-pro",
+		"gpt-5.4-mini",
+		"gpt-5.4-nano",
+	})
+	require.NoError(t, err)
+	models := decodeCodexManifestModels(t, body)
+	require.Len(t, models, 3)
+
+	for _, model := range models {
+		require.Equal(t, []any{}, model["service_tiers"], "slug=%v", model["slug"])
 		require.Nil(t, model["default_service_tier"])
 	}
 }

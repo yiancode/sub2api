@@ -502,13 +502,8 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 }
 
 func configuredCodexSupportsPriorityServiceTier(modelID string) bool {
-	normalized := canonicalizeOpenAIModelAliasSpelling(modelID)
-	for _, family := range []string{"gpt-5.4", "gpt-5.5", "gpt-5.6"} {
-		if normalized == family || strings.HasPrefix(normalized, family+"-") {
-			return true
-		}
-	}
-	return false
+	// Fast/priority 与计费 allowlist 同源，避免 gpt-5.5-pro、gpt-5.4-mini 等被前缀误挂 Fast。
+	return openAIModelFastPricingRatio(normalizeKnownOpenAICodexModel(modelID)) > 0
 }
 
 func configuredCodexGrokReasoningLevels(modelID string) []configuredCodexReasoningLevel {
