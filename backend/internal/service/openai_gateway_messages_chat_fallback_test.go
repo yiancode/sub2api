@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -480,4 +482,138 @@ func TestForwardAsAnthropic_ResponsesSupportedAccountStillUsesResponsesEndpoint(
 	require.Empty(t, upstream.lastReq.Header.Get("version"))
 	require.Empty(t, upstream.lastReq.Header.Get("OpenAI-Beta"))
 	require.Equal(t, "ok", gjson.Get(rec.Body.String(), "content.0.text").String())
+}
+
+func forceOpenAIFastGroupContext() context.Context {
+	return context.WithValue(context.Background(), ctxkey.Group, &Group{
+		ID: 7, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, ForceOpenAIFast: true,
+	})
+}
+
+func messagesChatFallbackJSONResponse(model string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid_msg_chat_fast"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_fast","object":"chat.completion","model":"` + model + `","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+		)),
+	}
+}
+
+func TestForwardAsAnthropic_ForceChatCompletions_GroupForceOpenAIFastInjectsPriority(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: messagesChatFallbackJSONResponse("gpt-5.4")}
+	svc := &OpenAIGatewayService{
+		cfg:          rawChatCompletionsTestConfig(),
+		httpUpstream: upstream,
+	}
+
+	result, err := svc.ForwardAsAnthropic(forceOpenAIFastGroupContext(), c, forceChatMessagesFallbackAccount(), body, "", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "http://upstream.example/v1/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(upstream.lastBody, "service_tier").String())
+	require.NotNil(t, result.ServiceTier)
+	require.Equal(t, OpenAIFastTierPriority, *result.ServiceTier)
+}
+
+func TestForwardAsAnthropic_ForceChatCompletions_GroupForceOpenAIFastBlockedAsAnthropic403(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: messagesChatFallbackJSONResponse("gpt-5.4")}
+	svc := newOpenAIGatewayServiceWithSettings(t, &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{{
+			ServiceTier:  OpenAIFastTierPriority,
+			Action:       BetaPolicyActionBlock,
+			Scope:        BetaPolicyScopeAll,
+			ErrorMessage: "fast mode is blocked",
+		}},
+	})
+	svc.cfg = rawChatCompletionsTestConfig()
+	svc.httpUpstream = upstream
+
+	result, err := svc.ForwardAsAnthropic(forceOpenAIFastGroupContext(), c, forceChatMessagesFallbackAccount(), body, "", "")
+	require.Error(t, err)
+	var blocked *OpenAIFastBlockedError
+	require.ErrorAs(t, err, &blocked)
+	require.Equal(t, "fast mode is blocked", blocked.Message)
+	require.Nil(t, result)
+	require.Nil(t, upstream.lastReq)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Equal(t, "error", gjson.Get(rec.Body.String(), "type").String())
+	require.Equal(t, "forbidden_error", gjson.Get(rec.Body.String(), "error.type").String())
+	require.Equal(t, "fast mode is blocked", gjson.Get(rec.Body.String(), "error.message").String())
+	require.True(t, HasOpsClientBusinessLimited(c))
+	require.Equal(t, OpsClientBusinessLimitedReasonLocalPolicyDenied, OpsClientBusinessLimitedReason(c))
+}
+
+func TestForwardAsAnthropic_ForceChatCompletions_BetaFastModeInjectsPriority(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("anthropic-beta", claude.BetaFastMode)
+
+	upstream := &httpUpstreamRecorder{resp: messagesChatFallbackJSONResponse("gpt-5.4")}
+	svc := &OpenAIGatewayService{
+		cfg:          rawChatCompletionsTestConfig(),
+		httpUpstream: upstream,
+	}
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, forceChatMessagesFallbackAccount(), body, "", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "http://upstream.example/v1/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, OpenAIFastTierPriority, gjson.GetBytes(upstream.lastBody, "service_tier").String())
+	require.NotNil(t, result.ServiceTier)
+	require.Equal(t, OpenAIFastTierPriority, *result.ServiceTier)
+}
+
+func TestForwardAsAnthropic_ForceChatCompletions_BetaFastModeBlockedAsAnthropic403(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("anthropic-beta", claude.BetaFastMode)
+
+	upstream := &httpUpstreamRecorder{resp: messagesChatFallbackJSONResponse("gpt-5.4")}
+	svc := newOpenAIGatewayServiceWithSettings(t, &OpenAIFastPolicySettings{
+		Rules: []OpenAIFastPolicyRule{{
+			ServiceTier:  OpenAIFastTierPriority,
+			Action:       BetaPolicyActionBlock,
+			Scope:        BetaPolicyScopeAll,
+			ErrorMessage: "fast mode is blocked",
+		}},
+	})
+	svc.cfg = rawChatCompletionsTestConfig()
+	svc.httpUpstream = upstream
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, forceChatMessagesFallbackAccount(), body, "", "")
+	require.Error(t, err)
+	var blocked *OpenAIFastBlockedError
+	require.ErrorAs(t, err, &blocked)
+	require.Nil(t, result)
+	require.Nil(t, upstream.lastReq)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Equal(t, "forbidden_error", gjson.Get(rec.Body.String(), "error.type").String())
+	require.Equal(t, "fast mode is blocked", gjson.Get(rec.Body.String(), "error.message").String())
 }
