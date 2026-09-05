@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,32 +97,44 @@ func TestAliyunCaptchaVerifier_TransportError(t *testing.T) {
 	}
 }
 
+func TestAliyunCaptchaVerifier_HTTP503WithoutOpenAPICode(t *testing.T) {
+	verifier, cred := newAliyunCaptchaTestTarget(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{}`))
+	})
+
+	_, err := verifier.VerifyCaptcha(context.Background(), cred, "param")
+	require.Error(t, err)
+	var apiErr *service.AliyunCaptchaAPIError
+	require.False(t, errors.As(err, &apiErr), "HTTP 503 without an OpenAPI code must not become AliyunCaptchaAPIError: %v", err)
+}
+
 func TestNormalizeAliyunCaptchaError(t *testing.T) {
 	t.Parallel()
 
-	signatureMismatch := tea.NewSDKError(map[string]interface{}{
+	signatureMismatch := tea.NewSDKError(map[string]any{
 		"code":       "SignatureDoesNotMatch",
 		"message":    "Specified signature is not matched with our calculation.",
 		"statusCode": 403,
 	})
-	unreachable := tea.NewSDKError(map[string]interface{}{
+	unreachable := tea.NewSDKError(map[string]any{
 		"code":       "<nil>",
 		"message":    "code: 503, <nil> request id: <nil>",
 		"statusCode": 503,
 	})
-	numericTransport := tea.NewSDKError(map[string]interface{}{
+	numericTransport := tea.NewSDKError(map[string]any{
 		"code":    503,
 		"message": "connection refused",
 	})
-	emptyCode := tea.NewSDKError(map[string]interface{}{
+	emptyCode := tea.NewSDKError(map[string]any{
 		"message": "i/o timeout",
 	})
-	daraUnreachable := dara.NewSDKError(map[string]interface{}{
+	daraUnreachable := dara.NewSDKError(map[string]any{
 		"code":       "<nil>",
 		"message":    "code: 503, connection refused request id: <nil>",
 		"statusCode": 503,
 	})
-	daraAPI := dara.NewSDKError(map[string]interface{}{
+	daraAPI := dara.NewSDKError(map[string]any{
 		"code":       "InvalidAccessKeyId.NotFound",
 		"message":    "specified access key is not found",
 		"statusCode": 404,
@@ -141,6 +154,11 @@ func TestNormalizeAliyunCaptchaError(t *testing.T) {
 		{name: "tea empty code is transport", err: emptyCode, wantAPI: false},
 		{name: "dara placeholder nil code is transport", err: daraUnreachable, wantAPI: false},
 		{name: "plain network error", err: plain, wantAPI: false},
+		{name: "wrapped tea placeholder code is transport", err: fmt.Errorf("captcha: %w", unreachable), wantAPI: false},
+		{name: "dara numeric http status is transport", err: dara.NewSDKError(map[string]any{
+			"code":    503,
+			"message": "connection refused",
+		}), wantAPI: false},
 	}
 
 	for _, tt := range tests {

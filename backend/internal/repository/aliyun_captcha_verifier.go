@@ -65,7 +65,7 @@ func (v *aliyunCaptchaVerifier) VerifyCaptcha(ctx context.Context, cred service.
 // normalizeAliyunCaptchaError 把带 OpenAPI 业务码的 SDK 错误归一化为
 // service.AliyunCaptchaAPIError。tea/dara 也会把连不上、超时等包装成 SDKError
 // （code 为 "<nil>"、空，或纯数字 HTTP 状态如 503），那些必须原样返回，
-// 否则后台凭证校验会把网络故障当成 AK/SK 无效。
+// 不能变成 AliyunCaptchaAPIError，以免后续 errors.As 把它当成 OpenAPI 业务错误。
 func normalizeAliyunCaptchaError(err error) error {
 	code, message, ok := aliyunCaptchaOpenAPIError(err)
 	if !ok {
