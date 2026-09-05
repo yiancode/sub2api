@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	captcha "github.com/alibabacloud-go/captcha-20230305/client"
 	openapiutil "github.com/alibabacloud-go/darabonba-openapi/v2/utils"
@@ -60,22 +62,52 @@ func (v *aliyunCaptchaVerifier) VerifyCaptcha(ctx context.Context, cred service.
 	return result, nil
 }
 
-// normalizeAliyunCaptchaError 把 SDK 的两种错误类型归一化为 service.AliyunCaptchaAPIError，
-// 其余错误（网络/超时等）原样返回。
+// normalizeAliyunCaptchaError 把带 OpenAPI 业务码的 SDK 错误归一化为
+// service.AliyunCaptchaAPIError。tea/dara 也会把连不上、超时等包装成 SDKError
+// （code 为 "<nil>"、空，或纯数字 HTTP 状态如 503），那些必须原样返回，
+// 否则后台凭证校验会把网络故障当成 AK/SK 无效。
 func normalizeAliyunCaptchaError(err error) error {
+	code, message, ok := aliyunCaptchaOpenAPIError(err)
+	if !ok {
+		return err
+	}
+	return &service.AliyunCaptchaAPIError{
+		Code:    code,
+		Message: message,
+	}
+}
+
+func aliyunCaptchaOpenAPIError(err error) (code, message string, ok bool) {
 	var teaErr *tea.SDKError
 	if errors.As(err, &teaErr) {
-		return &service.AliyunCaptchaAPIError{
-			Code:    tea.StringValue(teaErr.Code),
-			Message: tea.StringValue(teaErr.Message),
-		}
+		code = tea.StringValue(teaErr.Code)
+		message = tea.StringValue(teaErr.Message)
 	}
 	var daraErr *dara.SDKError
 	if errors.As(err, &daraErr) {
-		return &service.AliyunCaptchaAPIError{
-			Code:    dara.StringValue(daraErr.Code),
-			Message: dara.StringValue(daraErr.Message),
+		if c := dara.StringValue(daraErr.Code); c != "" {
+			code = c
+		}
+		if m := dara.StringValue(daraErr.Message); m != "" {
+			message = m
 		}
 	}
-	return err
+	if !isAliyunCaptchaOpenAPIErrorCode(code) {
+		return "", "", false
+	}
+	if message == "" {
+		message = err.Error()
+	}
+	return code, message, true
+}
+
+func isAliyunCaptchaOpenAPIErrorCode(code string) bool {
+	code = strings.TrimSpace(code)
+	if code == "" || code == "<nil>" || strings.EqualFold(code, "nil") {
+		return false
+	}
+	if _, convErr := strconv.Atoi(code); convErr == nil {
+		return false
+	}
+	return true
 }
