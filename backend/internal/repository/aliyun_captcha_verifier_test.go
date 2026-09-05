@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibabacloud-go/tea/dara"
+	"github.com/alibabacloud-go/tea/tea"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -89,5 +91,71 @@ func TestAliyunCaptchaVerifier_TransportError(t *testing.T) {
 	_, err := verifier.VerifyCaptcha(context.Background(), cred, "param")
 	require.Error(t, err)
 	var apiErr *service.AliyunCaptchaAPIError
-	require.False(t, errors.As(err, &apiErr), "transport errors must not be normalized to API errors")
+	if errors.As(err, &apiErr) {
+		t.Fatalf("transport errors must not be normalized to API errors: code=%q message=%q err=%v", apiErr.Code, apiErr.Message, err)
+	}
+}
+
+func TestNormalizeAliyunCaptchaError(t *testing.T) {
+	t.Parallel()
+
+	signatureMismatch := tea.NewSDKError(map[string]interface{}{
+		"code":       "SignatureDoesNotMatch",
+		"message":    "Specified signature is not matched with our calculation.",
+		"statusCode": 403,
+	})
+	unreachable := tea.NewSDKError(map[string]interface{}{
+		"code":       "<nil>",
+		"message":    "code: 503, <nil> request id: <nil>",
+		"statusCode": 503,
+	})
+	numericTransport := tea.NewSDKError(map[string]interface{}{
+		"code":    503,
+		"message": "connection refused",
+	})
+	emptyCode := tea.NewSDKError(map[string]interface{}{
+		"message": "i/o timeout",
+	})
+	daraUnreachable := dara.NewSDKError(map[string]interface{}{
+		"code":       "<nil>",
+		"message":    "code: 503, connection refused request id: <nil>",
+		"statusCode": 503,
+	})
+	daraAPI := dara.NewSDKError(map[string]interface{}{
+		"code":       "InvalidAccessKeyId.NotFound",
+		"message":    "specified access key is not found",
+		"statusCode": 404,
+	})
+	plain := errors.New("dial tcp 127.0.0.1:1: connect: connection refused")
+
+	tests := []struct {
+		name    string
+		err     error
+		wantAPI bool
+		code    string
+	}{
+		{name: "tea openapi business code", err: signatureMismatch, wantAPI: true, code: "SignatureDoesNotMatch"},
+		{name: "dara openapi business code", err: daraAPI, wantAPI: true, code: "InvalidAccessKeyId.NotFound"},
+		{name: "tea placeholder nil code is transport", err: unreachable, wantAPI: false},
+		{name: "tea numeric http status is transport", err: numericTransport, wantAPI: false},
+		{name: "tea empty code is transport", err: emptyCode, wantAPI: false},
+		{name: "dara placeholder nil code is transport", err: daraUnreachable, wantAPI: false},
+		{name: "plain network error", err: plain, wantAPI: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := normalizeAliyunCaptchaError(tt.err)
+			require.Error(t, got)
+			var apiErr *service.AliyunCaptchaAPIError
+			isAPI := errors.As(got, &apiErr)
+			require.Equal(t, tt.wantAPI, isAPI, "err=%v", got)
+			if tt.wantAPI {
+				require.Equal(t, tt.code, apiErr.Code)
+			} else {
+				require.Equal(t, tt.err, got)
+			}
+		})
+	}
 }
