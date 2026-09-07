@@ -18,7 +18,7 @@ import (
 // upstreamModel 是最终发往上游的模型 ID。
 // totalCost 是本次请求的客户计费（倍率前），用于优先级 2。
 // serviceTier 是最终参与用户计费的 OpenAI 服务层级，用于优先级 3。
-// pricingAt 与用户账单同源，用于 DeepSeek 峰谷等按时刻计价。
+// pricingAt 与本次客户计费使用同一时刻，避免跨峰谷请求的成本与售价错位。
 // reasoningEffort 是最终转发等级；Fable 5.1 max 默认按 3 倍额度消耗。
 func resolveAccountStatsCost(
 	ctx context.Context,
@@ -71,9 +71,9 @@ func resolveAccountStatsCost(
 }
 
 // tryModelFilePricing 使用模型定价文件（LiteLLM/fallback）中的价格计算费用。
-// 走 CalculateCostUnified，与用户默认价卡同一条管线（含 DeepSeek 峰谷、
-// service tier 与 Fable max 推理倍率）。channelService 为 nil，保持优先级 3：
-// 只取模型定价文件，不引入渠道自定义定价。
+// 与用户计费共用同一条定价管线，避免这里维护第二份"单价 × token 数"实现后，
+// 每加一个定价特性都要手工镜像一次。解析器不配置渠道或分组，保持优先级 3 的
+// 语义：只取模型定价文件，不引入自定义售价。
 func tryModelFilePricing(ctx context.Context, billingService *BillingService, model string, tokens UsageTokens, serviceTier string, pricingAt time.Time, reasoningEfforts ...string) *float64 {
 	reasoningEffort := ""
 	if len(reasoningEfforts) > 0 {
