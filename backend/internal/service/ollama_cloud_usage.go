@@ -1052,6 +1052,13 @@ func isOllamaCloudBaseURL(raw string) bool {
 	return parsed.Path == "" || parsed.Path == "/v1"
 }
 
+// isOllamaCloudOutboundBaseURL 判定本次实际选用的上游 base 是否指向 Ollama Cloud。
+// 出站 URL 组装会 TrimRight "/"，因此 https://ollama.com/ 与 …/v1/ 也必须命中；
+// 用量账号识别仍用未归一化的 isOllamaCloudBaseURL。
+func isOllamaCloudOutboundBaseURL(raw string) bool {
+	return isOllamaCloudBaseURL(strings.TrimRight(strings.TrimSpace(raw), "/"))
+}
+
 func ollamaCloudUsageIdentity(account *Account) map[string]any {
 	if !IsOllamaCloudUsageAccount(account) {
 		return nil

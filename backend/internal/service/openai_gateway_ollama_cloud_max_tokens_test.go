@@ -257,6 +257,16 @@ func TestClampOllamaCloudUpstreamMaxTokens(t *testing.T) {
 			want:    `{"model":"gpt-oss:120b-cloud","max_tokens":65535}`,
 		},
 		{
+			name: "openai platform trailing-slash ollama.com non-deepseek keeps legacy clamp",
+			account: func() *Account {
+				account := ollamaCloudRawChatCompletionsTestAccount()
+				account.Credentials["base_url"] = "https://ollama.com/"
+				return account
+			}(),
+			body: `{"model":"gpt-oss:120b-cloud","max_tokens":70000}`,
+			want: `{"model":"gpt-oss:120b-cloud","max_tokens":65535}`,
+		},
+		{
 			// 非 DeepSeek 模型不扩展到其它平台。
 			name: "openai platform ollama.com non-deepseek model without force_cc untouched",
 			account: func() *Account {
@@ -295,6 +305,36 @@ func TestClampOllamaCloudUpstreamMaxTokens(t *testing.T) {
 			account: ollamaUpstreamTestAccount(PlatformDeepseek, 304),
 			body:    `{"model":"deepseek-v4-flash","max_tokens":65535}`,
 			want:    `{"model":"deepseek-v4-flash","max_tokens":65535}`,
+		},
+		{
+			name: "trailing slash ollama.com base is clamped",
+			account: func() *Account {
+				account := ollamaUpstreamTestAccount(PlatformDeepseek, 306)
+				account.Credentials["base_url"] = "https://ollama.com/"
+				return account
+			}(),
+			body: `{"model":"deepseek-v4-flash","max_tokens":256000}`,
+			want: `{"model":"deepseek-v4-flash","max_tokens":65535}`,
+		},
+		{
+			name: "trailing slash ollama.com/v1/ base is clamped",
+			account: func() *Account {
+				account := ollamaUpstreamTestAccount(PlatformDeepseek, 307)
+				account.Credentials["base_url"] = "https://ollama.com/v1/"
+				return account
+			}(),
+			body: `{"model":"deepseek-v4-flash","max_completion_tokens":256000}`,
+			want: `{"model":"deepseek-v4-flash","max_completion_tokens":65535}`,
+		},
+		{
+			name: "www.ollama.com trailing slash base is clamped",
+			account: func() *Account {
+				account := ollamaUpstreamTestAccount(PlatformDeepseek, 308)
+				account.Credentials["base_url"] = "https://www.ollama.com/v1/"
+				return account
+			}(),
+			body: `{"model":"deepseek-v4-flash","max_tokens":256000}`,
+			want: `{"model":"deepseek-v4-flash","max_tokens":65535}`,
 		},
 	}
 
@@ -362,6 +402,151 @@ func TestForwardResponsesViaRawChatCompletions_DeepseekOllamaCloudClampsMaxToken
 	require.Equal(t, "https://ollama.com/v1/chat/completions", upstream.lastReq.URL.String())
 	require.Equal(t, "deepseek-v4-flash", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, int64(65535), gjson.GetBytes(upstream.lastBody, "max_completion_tokens").Int())
+}
+
+// TestForwardAnthropicViaRawChatCompletions_DeepseekOllamaCloudClampsMaxTokens 验证
+// /v1/messages → raw CC 回退与另外两条 CC 出站共用同一个 token 钩子。Anthropic
+// max_tokens 经转换落在 max_completion_tokens 上，未 clamp 时会原样 256000 出站。
+func TestForwardAnthropicViaRawChatCompletions_DeepseekOllamaCloudClampsMaxTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	account := ollamaUpstreamTestAccount(PlatformDeepseek, 351)
+	account.Credentials["api_protocol"] = APIProtocolChatCompletions
+
+	body := []byte(`{"model":"deepseek-v4-flash","max_tokens":256000,"messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	_, err := svc.ForwardAsAnthropic(context.Background(), adaptiveProtocolTestContext("/v1/messages", body), account, body, "", "")
+	require.Error(t, err)
+	require.Equal(t, "https://ollama.com/v1/chat/completions", upstream.lastReq.URL.String())
+	require.Equal(t, "deepseek-v4-flash", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, int64(65535), gjson.GetBytes(upstream.lastBody, "max_completion_tokens").Int())
+}
+
+// TestForwardCCAndResponses_ClampsTrailingSlashOllamaBase 覆盖 CC / Responses 出站
+// 在 base 带尾斜杠时仍须命中 clamp：出站 URL 组装会 TrimRight "/" 打到 ollama.com，
+// 判定必须与组装同源，否则 https://ollama.com/ 与 …/v1/ 会漏 clamp 被上游 400。
+func TestForwardCCAndResponses_ClampsTrailingSlashOllamaBase(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ccBody := []byte(`{"model":"deepseek-v4-flash","max_tokens":256000,"messages":[{"role":"user","content":"hi"}],"stream":false}`)
+	responsesBody := []byte(`{"model":"deepseek-v4-flash","input":"hi","max_output_tokens":256000,"stream":false}`)
+	messagesBody := []byte(`{"model":"deepseek-v4-flash","max_tokens":256000,"messages":[{"role":"user","content":"hi"}],"stream":false}`)
+
+	newAccount := func(id int64, base, protocol string) *Account {
+		account := ollamaUpstreamTestAccount(PlatformDeepseek, id)
+		account.Credentials["base_url"] = base
+		account.Credentials["api_protocol"] = protocol
+		return account
+	}
+	run := func(account *Account, path string, body []byte, forward func(*OpenAIGatewayService, *gin.Context, *Account, []byte) error) (*httpUpstreamRecorder, error) {
+		upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
+		svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+		err := forward(svc, adaptiveProtocolTestContext(path, body), account, body)
+		return upstream, err
+	}
+
+	tests := []struct {
+		name      string
+		base      string
+		protocol  string
+		path      string
+		body      []byte
+		forward   func(*OpenAIGatewayService, *gin.Context, *Account, []byte) error
+		wantURL   string
+		wantField string
+	}{
+		{
+			name:     "raw CC trailing slash root",
+			base:     "https://ollama.com/",
+			protocol: APIProtocolChatCompletions,
+			path:     "/v1/chat/completions",
+			body:     ccBody,
+			forward: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
+				return err
+			},
+			wantURL:   "https://ollama.com/v1/chat/completions",
+			wantField: "max_tokens",
+		},
+		{
+			name:     "raw CC trailing slash /v1/",
+			base:     "https://ollama.com/v1/",
+			protocol: APIProtocolChatCompletions,
+			path:     "/v1/chat/completions",
+			body:     ccBody,
+			forward: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.forwardAsRawChatCompletions(context.Background(), c, account, body, "")
+				return err
+			},
+			wantURL:   "https://ollama.com/v1/chat/completions",
+			wantField: "max_tokens",
+		},
+		{
+			name:     "native responses trailing slash root",
+			base:     "https://ollama.com/",
+			protocol: APIProtocolResponses,
+			path:     "/v1/responses",
+			body:     responsesBody,
+			forward: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.Forward(context.Background(), c, account, body)
+				return err
+			},
+			wantURL:   "https://ollama.com/responses",
+			wantField: "max_output_tokens",
+		},
+		{
+			name:     "native responses trailing slash /v1/",
+			base:     "https://ollama.com/v1/",
+			protocol: APIProtocolResponses,
+			path:     "/v1/responses",
+			body:     responsesBody,
+			forward: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.Forward(context.Background(), c, account, body)
+				return err
+			},
+			wantURL:   "https://ollama.com/v1/responses",
+			wantField: "max_output_tokens",
+		},
+		{
+			name:     "responses via raw CC trailing slash /v1/",
+			base:     "https://ollama.com/v1/",
+			protocol: APIProtocolChatCompletions,
+			path:     "/v1/responses",
+			body:     responsesBody,
+			forward: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.Forward(context.Background(), c, account, body)
+				return err
+			},
+			wantURL:   "https://ollama.com/v1/chat/completions",
+			wantField: "max_completion_tokens",
+		},
+		{
+			name:     "messages via raw CC trailing slash root",
+			base:     "https://ollama.com/",
+			protocol: APIProtocolChatCompletions,
+			path:     "/v1/messages",
+			body:     messagesBody,
+			forward: func(svc *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+				return err
+			},
+			wantURL:   "https://ollama.com/v1/chat/completions",
+			wantField: "max_completion_tokens",
+		},
+	}
+
+	for i, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := append([]byte(nil), test.body...)
+			upstream, err := run(newAccount(int64(360+i), test.base, test.protocol), test.path, body, test.forward)
+			require.Error(t, err)
+			require.Equal(t, test.wantURL, upstream.lastReq.URL.String())
+			require.Equal(t, int64(65535), gjson.GetBytes(upstream.lastBody, test.wantField).Int(),
+				"base %q 出站 %s 仍须命中 clamp", test.base, test.wantField)
+		})
+	}
 }
 
 // TestForwardResponsesClampsOllamaCloudMaxOutputTokens 覆盖原生 /v1/responses 路径

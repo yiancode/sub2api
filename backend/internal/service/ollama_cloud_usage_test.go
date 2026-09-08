@@ -495,6 +495,30 @@ func TestIsOllamaCloudUsageAccountStrictOfficialHost(t *testing.T) {
 	}
 }
 
+func TestIsOllamaCloudOutboundBaseURL(t *testing.T) {
+	tests := []struct {
+		baseURL  string
+		usage    bool
+		outbound bool
+	}{
+		{"https://ollama.com", true, true},
+		{"https://ollama.com/v1", true, true},
+		{"https://www.ollama.com/v1", true, true},
+		{"https://ollama.com/", false, true},
+		{"https://ollama.com/v1/", false, true},
+		{"https://www.ollama.com/v1/", false, true},
+		{"https://ollama.com.evil.com/", false, false},
+		{"https://ollama.com/anthropic/", false, false},
+		{"https://api.deepseek.com", false, false},
+	}
+	for _, test := range tests {
+		t.Run(test.baseURL, func(t *testing.T) {
+			require.Equal(t, test.usage, isOllamaCloudBaseURL(test.baseURL), "usage host")
+			require.Equal(t, test.outbound, isOllamaCloudOutboundBaseURL(test.baseURL), "outbound host")
+		})
+	}
+}
+
 // oauth 类型账号即使平台与 base_url 都命中也不进用量窗口（仅 apikey 账号）。
 func TestIsOllamaCloudUsageAccountRejectsOAuthType(t *testing.T) {
 	for _, platform := range []string{PlatformOpenAI, PlatformAnthropic, PlatformKimi, PlatformZhipu, PlatformDeepseek} {

@@ -24,11 +24,7 @@ func isOllamaCloudRawChatCompletionsAccount(account *Account) bool {
 	if accountHasOllamaCloudUsageExtra(account) {
 		return true
 	}
-	if account.Credentials == nil {
-		return false
-	}
-	baseURL, _ := account.Credentials["base_url"].(string)
-	return isOllamaCloudBaseURL(baseURL)
+	return isOllamaCloudOutboundBaseURL(account.GetOpenAIBaseURL())
 }
 
 func accountHasOllamaCloudUsageExtra(account *Account) bool {
@@ -48,7 +44,7 @@ func accountHasOllamaCloudUsageExtra(account *Account) bool {
 }
 
 // applyOllamaCloudRawChatCompletionsRequest 只做 Ollama Cloud reasoning 归一化；
-// max_tokens clamp 已解耦到独立钩子 clampOllamaCloudUpstreamMaxTokens，由出站方依次调用。
+// 输出上限由 clampOllamaCloudUpstreamMaxTokens 在出站时单独处理。
 func applyOllamaCloudRawChatCompletionsRequest(account *Account, body []byte) []byte {
 	if !isOllamaCloudRawChatCompletionsAccount(account) || len(body) == 0 {
 		return body

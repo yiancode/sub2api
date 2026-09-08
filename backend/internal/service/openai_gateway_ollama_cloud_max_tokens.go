@@ -14,22 +14,18 @@ import (
 // 设置，覆盖默认值 ollamaCloudDefaultMaxTokensCap；0 或负数表示显式禁用 clamp。
 const OllamaCloudMaxTokensCapExtraKey = "ollama_max_tokens_cap"
 
-// ollamaCloudDefaultMaxTokensCap 是 Ollama Cloud 对输出 token 数的 provider 级硬上限
-// （约 65535），max_tokens 超过该值会被上游直接 400 拒绝；该上限与模型无关，不做模型过滤。
+// ollamaCloudDefaultMaxTokensCap 是 Ollama Cloud 对输出 token 的 provider 级硬上限；
+// 超过会被上游 400。调用方按 DeepSeek（或 openai 平台 force_chat_completions 遗留账号）过滤。
 const ollamaCloudDefaultMaxTokensCap = 65535
 
-// clampOllamaCloudUpstreamMaxTokens 是 raw CC 出站（forwardAsRawChatCompletions 与
-// /v1/responses 降级 forwardResponsesViaRawChatCompletions 共用）的独立 token 钩子，
-// 与 reasoning 钩子解耦：只看本次请求实际选用的 CC 上游 base_url（GetOpenAIBaseURL，
-// 与 openAIChatCompletionsTargetURL 的取值一致）是否 ollama.com，不读 usage extra。
-// DeepSeek 系模型（用模型映射后的真实出站 model，body 中 model 已改写）任意平台均
-// clamp；非 DeepSeek 模型仅保留既有 openai 平台 Ollama 账号（force_chat_completions
-// 判定）的 clamp，不扩展到其它平台。
+// clampOllamaCloudUpstreamMaxTokens 在 raw CC 出站压输出上限。判定用本次 CC 上游
+// base（GetOpenAIBaseURL，含尾斜杠归一化）。DeepSeek 模型任意平台均 clamp；非
+// DeepSeek 仅保留 openai 平台 force_chat_completions 账号的既有行为。
 func clampOllamaCloudUpstreamMaxTokens(account *Account, body []byte) []byte {
 	if account == nil || len(body) == 0 {
 		return body
 	}
-	if !isOllamaCloudBaseURL(account.GetOpenAIBaseURL()) {
+	if !isOllamaCloudOutboundBaseURL(account.GetOpenAIBaseURL()) {
 		return body
 	}
 	if !isDeepSeekModel(gjson.GetBytes(body, "model").String()) && !isOllamaCloudRawChatCompletionsAccount(account) {
@@ -48,18 +44,13 @@ func ollamaCloudResponsesUpstreamBaseURL(account *Account) string {
 	return account.GetOpenAIBaseURL()
 }
 
-// ollamaCloudResponsesMaxOutputTokensClamp 是原生 /v1/responses 路径的 clamp：在
-// 平台字段归一化之后独立调用，不改写原有的 max_output_tokens 平台 switch。判定：
-// 实际 Responses 上游（ollamaCloudResponsesUpstreamBaseURL）为 ollama.com 的
-// APIKey 账号 + 映射后的出站模型是 DeepSeek 系；openai 平台 max_tokens 刚被归一化
-// patch 到 max_output_tokens 时取 max_tokens 为生效值。未命中返回 ok=false。
-// 实测：ollama.com/v1/responses max_output_tokens=256000 被上游以 "max_tokens
-// (256000) exceeds model's maximum output tokens (65536)" 400 拒绝（DeepSeek 模型）。
+// ollamaCloudResponsesMaxOutputTokensClamp 在原生 /v1/responses 路径压输出上限。
+// 实际 Responses 上游为 Ollama Cloud 且出站模型为 DeepSeek 时返回 cap。
 func ollamaCloudResponsesMaxOutputTokensClamp(account *Account, upstreamModel string, body []byte) (int64, bool) {
 	if account == nil || account.Type != AccountTypeAPIKey || !isDeepSeekModel(upstreamModel) {
 		return 0, false
 	}
-	if !isOllamaCloudBaseURL(ollamaCloudResponsesUpstreamBaseURL(account)) {
+	if !isOllamaCloudOutboundBaseURL(ollamaCloudResponsesUpstreamBaseURL(account)) {
 		return 0, false
 	}
 	value := gjson.GetBytes(body, "max_output_tokens")

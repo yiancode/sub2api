@@ -87,6 +87,15 @@ func TestIsOllamaCloudRawChatCompletionsAccount(t *testing.T) {
 		account.Platform = PlatformAnthropic
 		require.False(t, isOllamaCloudRawChatCompletionsAccount(account))
 	})
+
+	t.Run("trailing slash ollama.com still matches", func(t *testing.T) {
+		t.Parallel()
+		account := ollamaCloudRawChatCompletionsTestAccount()
+		account.Credentials["base_url"] = "https://ollama.com/"
+		require.True(t, isOllamaCloudRawChatCompletionsAccount(account))
+		account.Credentials["base_url"] = "https://ollama.com/v1/"
+		require.True(t, isOllamaCloudRawChatCompletionsAccount(account))
+	})
 }
 
 func TestNormalizeOllamaCloudChatCompletionsResponseJSON(t *testing.T) {
