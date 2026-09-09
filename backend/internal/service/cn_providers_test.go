@@ -259,6 +259,8 @@ func TestMiniMaxQuotaURL(t *testing.T) {
 		minimaxQuotaURL("https://api.minimax.com/v1"))
 	require.Equal(t, "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains",
 		minimaxQuotaURL("https://custom.example.com"))
+	require.Equal(t, "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains",
+		minimaxQuotaURL("https://myminimax.io/v1"))
 }
 
 func TestParseMiniMaxUsageTiers(t *testing.T) {

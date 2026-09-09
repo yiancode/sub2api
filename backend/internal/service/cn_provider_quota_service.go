@@ -334,7 +334,7 @@ func kimiQuotaURL(baseURL string) string {
 // 官方 FAQ 写 www.minimax.io / www.minimaxi.com，实际以 Bearer Key 打 api.*。
 // 国际站 api.minimax.io；国内站 api.minimaxi.com（含 api.minimax.com 与自定义回落）。
 func minimaxQuotaURL(baseURL string) string {
-	if strings.Contains(strings.ToLower(baseURL), "minimax.io") {
+	if hostMatchesDomain(codingPlanHostname(baseURL), "minimax.io") {
 		return "https://api.minimax.io/v1/api/openplatform/coding_plan/remains"
 	}
 	return "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains"

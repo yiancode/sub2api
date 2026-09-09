@@ -1594,19 +1594,44 @@ func (a *Account) GetCodingPlanProvider() string {
 	case PlatformKimi, PlatformZhipu:
 		return a.Platform
 	}
-	baseURL := strings.ToLower(a.GetOpenAIBaseURL())
+	baseURL := a.GetOpenAIBaseURL()
+	lower := strings.ToLower(baseURL)
 	switch {
-	case strings.Contains(baseURL, "api.kimi.com/coding"):
+	case strings.Contains(lower, "api.kimi.com/coding"):
 		return PlatformKimi
-	case strings.Contains(baseURL, "bigmodel.cn"), strings.Contains(baseURL, "api.z.ai"):
+	case strings.Contains(lower, "bigmodel.cn"), strings.Contains(lower, "api.z.ai"):
 		return PlatformZhipu
-	case strings.Contains(baseURL, "minimax.io"),
-		strings.Contains(baseURL, "minimaxi.com"),
-		strings.Contains(baseURL, "minimax.com"):
+	case isOfficialMiniMaxHost(baseURL):
 		return PlatformMiniMax
 	default:
 		return ""
 	}
+}
+
+// codingPlanHostname 从 base_url 取出小写 hostname。无 scheme 或解析失败返回空串。
+func codingPlanHostname(baseURL string) string {
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+}
+
+func hostMatchesDomain(host, root string) bool {
+	return host != "" && (host == root || strings.HasSuffix(host, "."+root))
+}
+
+// isOfficialMiniMaxHost 只认 MiniMax 官方 hostname（精确或 DNS 后缀），
+// 避免 myminimax.com、api.minimax.com.evil.example、path 嵌入官方名被当成官网。
+func isOfficialMiniMaxHost(baseURL string) bool {
+	host := codingPlanHostname(baseURL)
+	return hostMatchesDomain(host, "minimax.io") ||
+		hostMatchesDomain(host, "minimaxi.com") ||
+		hostMatchesDomain(host, "minimax.com")
 }
 
 func (a *Account) GetOpenAIAccessToken() string {
