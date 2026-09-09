@@ -327,6 +327,26 @@ func TestGetCodingPlanProvider_MiniMax(t *testing.T) {
 		"account_mode": AccountModeCoding,
 		"base_url":     "https://relay.example.com/v1",
 	}}).GetCodingPlanProvider())
+	// hostname 精确/后缀匹配：邻近域名、子串伪装、path 嵌入官方名都不得识别。
+	for _, baseURL := range []string{
+		"https://myminimax.com/v1",
+		"https://api.minimax.com.evil.example/v1",
+		"https://relay.example.com/minimax.com/v1",
+		"https://notminimax.io/v1",
+	} {
+		require.Empty(t, (&Account{Platform: PlatformMiniMax, Type: AccountTypeAPIKey, Credentials: map[string]any{
+			"account_mode": AccountModeCoding,
+			"base_url":     baseURL,
+		}}).GetCodingPlanProvider(), baseURL)
+	}
+	require.Equal(t, PlatformMiniMax, (&Account{Platform: PlatformMiniMax, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"account_mode": AccountModeCoding,
+		"base_url":     "https://www.minimax.io/anthropic",
+	}}).GetCodingPlanProvider())
+	require.Equal(t, PlatformMiniMax, (&Account{Platform: PlatformMiniMax, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"account_mode": AccountModeCoding,
+		"base_url":     "https://api.minimax.com/v1",
+	}}).GetCodingPlanProvider())
 }
 
 // TestCNBalanceURL Kimi 固定端点；DeepSeek 基于 base_url 拼接。
