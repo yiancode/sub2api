@@ -471,7 +471,7 @@ func TestGatewayRoutesOpenAICountTokensPathIsRegistered(t *testing.T) {
 // 测试路由只注入空 OpenAIGatewayHandler；若误走 CountTokens，缺依赖会 503。
 func TestGatewayRoutesCNCountTokensUsesLocalEstimate(t *testing.T) {
 	body := `{"model":"kimi-k2.5","messages":[{"role":"user","content":"hi"}]}`
-	for _, platform := range []string{service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek} {
+	for _, platform := range []string{service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek, service.PlatformMiniMax} {
 		t.Run(platform, func(t *testing.T) {
 			router := newGatewayRoutesTestRouterWithConfig(&config.Config{
 				Gateway: config.GatewayConfig{MaxBodySize: 1024 * 1024},
