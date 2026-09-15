@@ -89,6 +89,39 @@ func TestCNProviderQuotaService_CustomZhipuBaseURLStaysOnSameHost(t *testing.T) 
 	require.NotContains(t, upstream.lastReq.URL.Host, "bigmodel.cn")
 }
 
+func newOpenCodeGoProbeAccount(baseURL, apiKey string) *Account {
+	creds := map[string]any{
+		"account_mode": AccountModeGo,
+		"api_key":      apiKey,
+	}
+	if baseURL != "" {
+		creds["base_url"] = baseURL
+	}
+	return &Account{
+		ID:          12,
+		Platform:    PlatformOpenCodeGo,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Credentials: creds,
+	}
+}
+
+func TestCNProviderQuotaService_CustomOpenCodeGoBaseURLStaysOnSameHost(t *testing.T) {
+	repo := &fakeCNProbeAccountRepo{account: newOpenCodeGoProbeAccount("https://relay.example.com/v1", "sk-relay")}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"usage":{"rolling":{"percent":10}}}`)),
+	}}
+	svc := NewCNProviderQuotaService(repo, nil, upstream, nil)
+
+	result, err := svc.QueryUsage(context.Background(), 12)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "https://relay.example.com/v1/usage", upstream.lastReq.URL.String())
+	require.NotContains(t, upstream.lastReq.URL.Host, "opencode.ai")
+}
+
 func TestCNProviderQuotaService_CustomZhipuHostRespectsAllowlist(t *testing.T) {
 	repo := &fakeCNProbeAccountRepo{account: newZhipuCodingProbeAccount("https://relay.example.com/api/paas/v4", "sk-relay")}
 	upstream := &recordingHTTPUpstream{}

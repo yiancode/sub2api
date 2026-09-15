@@ -379,6 +379,47 @@ func TestGetCodingPlanProvider_MiniMax(t *testing.T) {
 	}}).GetCodingPlanProvider())
 }
 
+func TestGetCodingPlanProvider_OpenCode(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		account *Account
+		want    string
+	}{
+		{
+			name: "go mode",
+			account: &Account{Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{
+				"account_mode": AccountModeGo,
+			}},
+			want: PlatformOpenCodeGo,
+		},
+		{
+			name:    "unset mode defaults to go",
+			account: &Account{Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey},
+			want:    PlatformOpenCodeGo,
+		},
+		{
+			name: "go custom base url still identified",
+			account: &Account{Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{
+				"account_mode": AccountModeGo,
+				"base_url":     "https://relay.example.com/v1",
+			}},
+			want: PlatformOpenCodeGo,
+		},
+		{
+			name: "zen has no quota window",
+			account: &Account{Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Credentials: map[string]any{
+				"account_mode": AccountModeZen,
+			}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.account.GetCodingPlanProvider())
+		})
+	}
+}
+
 // TestCNBalanceURL Kimi 固定端点；DeepSeek 基于 base_url 拼接。
 func TestCNBalanceURL(t *testing.T) {
 	t.Parallel()

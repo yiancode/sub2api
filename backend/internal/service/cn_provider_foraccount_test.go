@@ -47,6 +47,14 @@ func TestValidateCodingPlanAccount_Matrix(t *testing.T) {
 		{name: "kimi coding ok", account: codingAccount(PlatformKimi)},
 		{name: "zhipu coding ok", account: codingAccount(PlatformZhipu)},
 		{name: "minimax coding ok", account: codingAccount(PlatformMiniMax)},
+		{name: "opencode go ok", account: &Account{
+			ID: 4, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Status: StatusActive,
+			Credentials: map[string]any{"account_mode": AccountModeGo, "api_key": "sk-test"},
+		}},
+		{name: "opencode zen has no quota window", account: &Account{
+			ID: 5, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Status: StatusActive,
+			Credentials: map[string]any{"account_mode": AccountModeZen, "api_key": "sk-test"},
+		}, wantReason: "CN_QUOTA_NOT_CODING_PLAN"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -91,6 +99,13 @@ func TestCNProviderQuotaService_QueryUsageForAccount_RejectsInvalidAccount(t *te
 	svc := NewCNProviderQuotaService(repo, nil, upstream, nil)
 
 	_, err := svc.QueryUsageForAccount(context.Background(), paygAccount(PlatformKimi))
+	requireReason(t, err, "CN_QUOTA_NOT_CODING_PLAN")
+	require.Zero(t, upstream.calls)
+
+	_, err = svc.QueryUsageForAccount(context.Background(), &Account{
+		ID: 5, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Status: StatusActive,
+		Credentials: map[string]any{"account_mode": AccountModeZen, "api_key": "sk-test"},
+	})
 	requireReason(t, err, "CN_QUOTA_NOT_CODING_PLAN")
 	require.Zero(t, upstream.calls)
 
