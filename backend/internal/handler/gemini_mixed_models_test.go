@@ -1,19 +1,36 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
 )
+
+// geminiAntigravityListErrorRepo fails only the Antigravity-only listing used by
+// AntigravityGeminiModelIDs, so native Gemini selection can still proceed.
+type geminiAntigravityListErrorRepo struct {
+	geminiAllowlistAccountRepoStub
+	err error
+}
+
+func (s *geminiAntigravityListErrorRepo) ListSchedulableByGroupIDAndPlatforms(ctx context.Context, groupID int64, platforms []string) ([]service.Account, error) {
+	if s.err != nil && len(platforms) == 1 && platforms[0] == service.PlatformAntigravity {
+		return nil, s.err
+	}
+	return s.geminiAllowlistAccountRepoStub.ListSchedulableByGroupIDAndPlatforms(ctx, groupID, platforms)
+}
 
 func TestGeminiNativeModelsUsesAccountMappings(t *testing.T) {
 	for _, tt := range []struct {
@@ -133,4 +150,55 @@ func TestGeminiNativeModelsMergesNativeUpstream(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGeminiV1BetaListModels_AntigravityListingFailureDoesNotBlockNative(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	id := int64(47)
+	repo := &geminiAntigravityListErrorRepo{
+		geminiAllowlistAccountRepoStub: geminiAllowlistAccountRepoStub{gatewayModelsAccountRepoStub: gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{id: {
+			{ID: 1, Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test"}},
+			{ID: 2, Platform: service.PlatformAntigravity, Extra: map[string]any{"mixed_scheduling": true}, Credentials: map[string]any{"model_mapping": map[string]any{"gemini-synced-custom": "gemini-3.8-flash-high"}}},
+		}}}},
+		err: errors.New("antigravity account store unavailable"),
+	}
+	upstream := &geminiMixedModelsUpstream{status: 200, body: `{"models":[{"name":"models/gemini-native","inputTokenLimit":123}]}`}
+	h := &GatewayHandler{geminiCompatService: service.NewGeminiMessagesCompatService(repo, nil, nil, nil, nil, nil, upstream, nil, &config.Config{})}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{GroupID: &id, Group: &service.Group{ID: id, Platform: service.PlatformGemini}})
+	h.GeminiV1BetaListModels(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotEqual(t, http.StatusServiceUnavailable, rec.Code)
+	require.NotContains(t, rec.Body.String(), "Unable to list Antigravity models")
+	require.NotContains(t, rec.Body.String(), "antigravity account store unavailable")
+	require.Contains(t, rec.Body.String(), "models/gemini-native")
+}
+
+func TestGeminiV1BetaListModels_AntigravityListingFailureDoesNotExpose503WhenNativeAlsoMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	id := int64(48)
+	repo := &geminiAntigravityListErrorRepo{
+		geminiAllowlistAccountRepoStub: geminiAllowlistAccountRepoStub{gatewayModelsAccountRepoStub: gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{id: {
+			{ID: 2, Platform: service.PlatformAntigravity, Extra: map[string]any{"mixed_scheduling": true}, Credentials: map[string]any{"model_mapping": map[string]any{"gemini-synced-custom": "gemini-3.8-flash-high"}}},
+		}}}},
+		err: errors.New("antigravity account store unavailable"),
+	}
+	h := &GatewayHandler{geminiCompatService: service.NewGeminiMessagesCompatService(repo, nil, nil, nil, nil, nil, nil, nil, &config.Config{})}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{GroupID: &id, Group: &service.Group{ID: id, Platform: service.PlatformGemini}})
+	h.GeminiV1BetaListModels(c)
+
+	require.NotEqual(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.NotEqual(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+	require.NotContains(t, rec.Body.String(), "Unable to list Antigravity models")
+	require.NotContains(t, rec.Body.String(), "antigravity account store unavailable")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got gemini.ModelsListResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Empty(t, got.Models)
 }

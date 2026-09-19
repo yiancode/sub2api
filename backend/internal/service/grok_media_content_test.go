@@ -22,11 +22,15 @@ type grokMediaContentUpstreamStub struct {
 	requests  []*http.Request
 	response  *http.Response
 	responses []*http.Response
+	err       error
 }
 
 func (s *grokMediaContentUpstreamStub) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	s.request = req
 	s.requests = append(s.requests, req)
+	if s.err != nil {
+		return nil, s.err
+	}
 	if len(s.responses) > 0 {
 		resp := s.responses[0]
 		s.responses = s.responses[1:]

@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"testing"
@@ -106,7 +107,57 @@ func TestSeedancePreservesUpstreamErrorsWithoutRetry(t *testing.T) {
 	c, w := grokMediaContentTestContext(http.MethodPost, "/api/v3/contents/generations/tasks", nil)
 	_, err := svc.ForwardSeedance(context.Background(), c, seedanceTestAccount(), SeedanceEndpointCreate, "", []byte(`{"model":"video","content":[{"type":"text","text":"waves"}]}`))
 	require.Error(t, err)
-	require.Equal(t, 429, w.Code)
-	require.Contains(t, w.Body.String(), "QuotaExceeded")
+	require.Len(t, upstream.requests, 1)
+	require.NotEqual(t, http.StatusTooManyRequests, w.Code)
+	require.NotEqual(t, http.StatusBadGateway, w.Code)
+	require.NotEqual(t, http.StatusServiceUnavailable, w.Code)
+	require.NotContains(t, w.Body.String(), "QuotaExceeded")
+	require.NotContains(t, w.Body.String(), "quota exhausted")
+}
+
+func TestSeedanceDoesNotWritePlatformOrTransportFailures(t *testing.T) {
+	body := []byte(`{"model":"video","content":[{"type":"text","text":"waves"}]}`)
+	cases := []struct {
+		name     string
+		status   int
+		respBody string
+		err      error
+		leak     string
+	}{
+		{name: "upstream 500", status: 500, respBody: `{"error":{"message":"ark internal"}}`, leak: "ark internal"},
+		{name: "upstream 503", status: 503, respBody: `{"error":{"message":"ark overloaded"}}`, leak: "ark overloaded"},
+		{name: "missing task id", status: 200, respBody: `{"status":"queued"}`},
+		{name: "transport", err: errors.New("dial tcp: connection reset")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &grokMediaContentUpstreamStub{err: tc.err}
+			if tc.err == nil {
+				upstream.response = grokMediaContentStatusResponse(tc.respBody)
+				upstream.response.StatusCode = tc.status
+			}
+			svc := &OpenAIGatewayService{httpUpstream: upstream}
+			c, w := grokMediaContentTestContext(http.MethodPost, "/api/v3/contents/generations/tasks", nil)
+			_, err := svc.ForwardSeedance(context.Background(), c, seedanceTestAccount(), SeedanceEndpointCreate, "", body)
+			require.Error(t, err)
+			require.NotEqual(t, http.StatusBadGateway, w.Code, w.Body.String())
+			require.NotEqual(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
+			if tc.leak != "" {
+				require.NotContains(t, w.Body.String(), tc.leak)
+			}
+			require.Empty(t, w.Body.String())
+		})
+	}
+}
+
+func TestSeedancePassthroughUserRequestErrors(t *testing.T) {
+	upstream := &grokMediaContentUpstreamStub{response: grokMediaContentStatusResponse(`{"error":{"code":"InvalidParameter","message":"content is required"}}`)}
+	upstream.response.StatusCode = http.StatusBadRequest
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	c, w := grokMediaContentTestContext(http.MethodPost, "/api/v3/contents/generations/tasks", nil)
+	_, err := svc.ForwardSeedance(context.Background(), c, seedanceTestAccount(), SeedanceEndpointCreate, "", []byte(`{"model":"video","content":[{"type":"text","text":"waves"}]}`))
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "InvalidParameter")
 	require.Len(t, upstream.requests, 1)
 }
