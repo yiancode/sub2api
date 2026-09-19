@@ -60,10 +60,15 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 		return filtered
 	}
 
+	agListingFailed := false
 	agModelIDs, err := h.geminiCompatService.AntigravityGeminiModelIDs(c.Request.Context(), apiKey.GroupID, forcePlatform != service.PlatformAntigravity)
 	if err != nil {
-		googleError(c, http.StatusServiceUnavailable, "Unable to list Antigravity models")
-		return
+		agListingFailed = true
+		agModelIDs = nil
+		logger.L().With(
+			zap.String("component", "handler.gemini_v1beta.list_models"),
+			zap.Any("group_id", apiKey.GroupID),
+		).Warn("gemini.antigravity_models_list_failed", zap.Error(err))
 	}
 	agModels := make([]gemini.Model, 0, len(agModelIDs))
 	for _, id := range agModelIDs {
@@ -81,17 +86,33 @@ func (h *GatewayHandler) GeminiV1BetaListModels(c *gin.Context) {
 			return
 		}
 		markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+		if agListingFailed {
+			c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(agModels)})
+			return
+		}
 		googleError(c, http.StatusServiceUnavailable, "No available Gemini accounts: "+err.Error())
 		return
 	}
 
 	res, err := h.geminiCompatService.ForwardAIStudioGET(c.Request.Context(), account, "/v1beta/models")
 	if err != nil {
+		if len(agModels) > 0 {
+			c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(agModels)})
+			return
+		}
+		if agListingFailed {
+			c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(agModels)})
+			return
+		}
 		googleError(c, http.StatusBadGateway, err.Error())
 		return
 	}
 	if shouldFallbackGeminiModels(res) {
 		c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(mergeGeminiModelLists(gemini.DefaultModels(), agModels))})
+		return
+	}
+	if agListingFailed && res != nil && res.StatusCode != http.StatusOK {
+		c.JSON(http.StatusOK, gemini.ModelsListResponse{Models: filterGeminiModels(agModels)})
 		return
 	}
 	if res.StatusCode == http.StatusOK && len(agModels) > 0 {

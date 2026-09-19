@@ -198,7 +198,57 @@ func TestGeminiV1BetaListModels_AntigravityListingFailureDoesNotExpose503WhenNat
 	require.NotContains(t, rec.Body.String(), "Unable to list Antigravity models")
 	require.NotContains(t, rec.Body.String(), "antigravity account store unavailable")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"models":[]`)
 	var got gemini.ModelsListResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Empty(t, got.Models)
+}
+
+func TestGeminiV1BetaListModels_AntigravityListingFailureDoesNotExposeNativeGETFailures(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	id := int64(49)
+	repo := &geminiAntigravityListErrorRepo{
+		geminiAllowlistAccountRepoStub: geminiAllowlistAccountRepoStub{gatewayModelsAccountRepoStub: gatewayModelsAccountRepoStub{byGroup: map[int64][]service.Account{id: {
+			{ID: 1, Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test"}},
+		}}}},
+		err: errors.New("antigravity account store unavailable"),
+	}
+	cases := []struct {
+		name     string
+		status   int
+		body     string
+		upstream service.HTTPUpstream
+	}{
+		{name: "transport", upstream: geminiFailingModelsUpstream{err: errors.New("dial tcp: i/o timeout")}},
+		{name: "upstream 500", status: 500, body: `{"error":{"message":"gemini internal"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := tc.upstream
+			if upstream == nil {
+				upstream = &geminiMixedModelsUpstream{status: tc.status, body: tc.body}
+			}
+			h := &GatewayHandler{geminiCompatService: service.NewGeminiMessagesCompatService(repo, nil, nil, nil, nil, nil, upstream, nil, &config.Config{})}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1beta/models", nil)
+			c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{GroupID: &id, Group: &service.Group{ID: id, Platform: service.PlatformGemini}})
+			h.GeminiV1BetaListModels(c)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.NotEqual(t, http.StatusBadGateway, rec.Code)
+			require.NotEqual(t, http.StatusServiceUnavailable, rec.Code)
+			require.NotContains(t, rec.Body.String(), "i/o timeout")
+			require.NotContains(t, rec.Body.String(), "gemini internal")
+			require.Contains(t, rec.Body.String(), `"models":[]`)
+		})
+	}
+}
+
+type geminiFailingModelsUpstream struct {
+	service.HTTPUpstream
+	err error
+}
+
+func (u geminiFailingModelsUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return nil, u.err
 }

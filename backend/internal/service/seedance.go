@@ -13,6 +13,16 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+func seedanceClientPassthroughStatus(status int) bool {
+	switch status {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge,
+		http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	SeedanceEndpointCreate           GrokMediaEndpoint        = "seedance_create"
 	SeedanceEndpointStatus           GrokMediaEndpoint        = "seedance_status"
@@ -130,9 +140,11 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 		return nil, err
 	}
 	// Do not retry ambiguous asynchronous creates: the upstream may already have
-	// accepted a billable job. Preserve native error codes and response bodies.
+	// accepted a billable job. Only user-side 4xx bodies may be written through.
 	if resp.StatusCode >= 300 {
-		writeGrokMediaResponse(c, resp, responseBody, s.responseHeaderFilter)
+		if seedanceClientPassthroughStatus(resp.StatusCode) {
+			writeGrokMediaResponse(c, resp, responseBody, s.responseHeaderFilter)
+		}
 		return nil, fmt.Errorf("seedance upstream status %d", resp.StatusCode)
 	}
 	result := &OpenAIForwardResult{Model: model, BillingModel: model, UpstreamModel: upstreamModel, Duration: time.Since(started), ResponseHeaders: resp.Header.Clone()}

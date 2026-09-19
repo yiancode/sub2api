@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -266,6 +267,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				zap.Error(err),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
+			if endpoint.IsSeedance() {
+				h.respondSeedanceNoEligibleAccount(c, requestModel, routingModel, err)
+				return
+			}
 			if endpoint.IsGenerationRequest() && errors.Is(err, service.ErrNoAvailableAccounts) &&
 				(len(failedAccountIDs) == 0 || (mediaEligibilityRejected && lastFailoverErr == nil)) {
 				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
@@ -288,6 +293,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			return
 		}
 		if selection == nil || selection.Account == nil {
+			if endpoint.IsSeedance() {
+				h.respondSeedanceNoEligibleAccount(c, requestModel, routingModel, err)
+				return
+			}
 			if endpoint.IsGenerationRequest() {
 				markOpsRoutingCapacityLimited(c)
 				h.errorResponse(c, http.StatusServiceUnavailable, noAccountCode, noAccountMessage)
@@ -454,7 +463,11 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account, grokMediaScheduleModel(account, routingModel, nil), false, nil)
 			if !service.IsResponseCommitted(c) && c.Writer.Size() == writerSizeBeforeForward {
-				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+				if endpoint.IsSeedance() {
+					h.respondSeedanceSwallowedUpstreamError(c, err)
+				} else {
+					h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+				}
 			}
 			reqLog.Warn("grok_media.forward_failed",
 				zap.Int64("account_id", account.ID),
@@ -558,6 +571,32 @@ func grokMediaScheduleModel(account *service.Account, routingModel string, resul
 		return strings.TrimSpace(routingModel)
 	}
 	return account.GetMappedModel(routingModel)
+}
+
+func (h *OpenAIGatewayHandler) respondSeedanceNoEligibleAccount(c *gin.Context, requestModel, routingModel string, selectErr error) {
+	if selectErr != nil {
+		markOpsRoutingCapacityLimitedIfNoAvailable(c, selectErr)
+	} else {
+		markOpsRoutingCapacityLimited(c)
+	}
+	display := strings.TrimSpace(requestModel)
+	if display == "" {
+		display = strings.TrimSpace(routingModel)
+	}
+	if display == "" {
+		display = "requested model"
+	}
+	h.errorResponse(c, http.StatusNotFound, "model_not_found",
+		fmt.Sprintf("Model %q is not supported by any configured account in this group", display))
+}
+
+func (h *OpenAIGatewayHandler) respondSeedanceSwallowedUpstreamError(c *gin.Context, err error) {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	service.SetOpsUpstreamError(c, 0, msg, "")
+	h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Unable to complete the request")
 }
 
 func isGrokVideoCreateEndpoint(endpoint service.GrokMediaEndpoint) bool {

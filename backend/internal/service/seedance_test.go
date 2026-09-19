@@ -161,3 +161,15 @@ func TestSeedancePassthroughUserRequestErrors(t *testing.T) {
 	require.Contains(t, w.Body.String(), "InvalidParameter")
 	require.Len(t, upstream.requests, 1)
 }
+
+func TestSeedanceDoesNotPassthroughPlatform404(t *testing.T) {
+	upstream := &grokMediaContentUpstreamStub{response: grokMediaContentStatusResponse(`{"error":{"code":"NotFound","message":"unknown ark path"}}`)}
+	upstream.response.StatusCode = http.StatusNotFound
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	c, w := grokMediaContentTestContext(http.MethodPost, "/api/v3/contents/generations/tasks", nil)
+	_, err := svc.ForwardSeedance(context.Background(), c, seedanceTestAccount(), SeedanceEndpointCreate, "", []byte(`{"model":"video","content":[{"type":"text","text":"waves"}]}`))
+	require.Error(t, err)
+	require.Empty(t, w.Body.String())
+	require.NotEqual(t, http.StatusNotFound, w.Code)
+	require.NotContains(t, w.Body.String(), "unknown ark path")
+}
