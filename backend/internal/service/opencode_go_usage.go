@@ -36,7 +36,6 @@ const (
 	// floor inside the SQL due filter.
 	OpenCodeGoUsageMinFetchInterval = opencodeGoUsageMinIntervalMinutes * time.Minute
 
-	opencodeGoUsageAPIURL                 = "https://opencode.ai/zen/go/v1/usage"
 	opencodeGoUsageDefaultIntervalMinutes = 15
 	opencodeGoUsageMinIntervalMinutes     = 5
 	opencodeGoUsageMaxIntervalMinutes     = 24 * 60
@@ -752,10 +751,18 @@ func (s *OpenCodeGoUsageService) refreshLoadedAccount(ctx context.Context, accou
 		}
 		proxyURL = account.Proxy.URL()
 	}
+	probeURL, probeErr := openCodeGoUsageProbeURL(account)
+	if probeErr != nil {
+		return nil, probeErr
+	}
+	expectedURL, err := url.Parse(probeURL)
+	if err != nil {
+		return nil, ErrOpenCodeGoUsageUnavailable
+	}
 	requestCtx, cancel := context.WithTimeout(WithHTTPUpstreamRedirectsDisabled(ctx), opencodeGoUsageRequestTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, opencodeGoUsageAPIURL, nil)
-	if err != nil || !isExactOpenCodeGoUsageURL(req.URL) {
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, probeURL, nil)
+	if err != nil || !sameOpenCodeGoUsageProbeURL(req.URL, expectedURL) {
 		return nil, ErrOpenCodeGoUsageUnavailable
 	}
 	req.Header.Set("Accept", "application/json")
@@ -769,7 +776,7 @@ func (s *OpenCodeGoUsageService) refreshLoadedAccount(ctx context.Context, accou
 		return s.persistFailure(ctx, account, intervalMinutes, now, 0, "empty_response", 0, false)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.Request != nil && !isExactOpenCodeGoUsageURL(resp.Request.URL) {
+	if resp.Request != nil && !sameOpenCodeGoUsageProbeURL(resp.Request.URL, expectedURL) {
 		return s.persistFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "response_host_mismatch", 0, false)
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
@@ -884,15 +891,10 @@ func isOpenCodeGoUsageMountPlatform(platform string) bool {
 }
 
 // IsOpenCodeGoUsageAccount 判定账号是否参与 OpenCode Go 用量窗口，资格来源分派：
-//   - platform == opencode_go：平台字段是权威来源，以 IsOpenCodeGoPlan 为准（必须是
-//     Go 订阅；Zen 按量付费无订阅配额窗口，上游 CN 配额链路同样排除）。此分支不要求
-//     base_url 匹配——opencode_go 账号的 base_url 可能是 CC/Responses 基址
-//     （/zen/go/v1）或 Anthropic 基址（/zen/go），甚至为空。这是有意取舍：平台 +
-//     模式已是权威来源，且账号指向自建代理/中转时 key 仍是官方 OpenCode key，从
-//     官方端点取用量恰恰是正确数据源，强制要求官方 host 会破坏这类合法用法；
-//     前提假设是该账号的 api_key 为官方 OpenCode Go 订阅 key。
-//   - 其它平台：仅限挂载白名单（isOpenCodeGoUsageMountPlatform）内的 API Key 账号，
-//     以 base_url 严格指向官方 OpenCode Go 基址判定（见 isOpenCodeGoBaseURL）。
+//   - platform == opencode_go：以 IsOpenCodeGoPlan 为准（Zen 没有订阅窗口）。
+//     base_url 可以是官方基址、为空，或自建中转。探测地址跟账号 host 走，
+//     见 openCodeGoUsageProbeURL，不能改写到 opencode.ai。
+//   - 其它平台：仅限挂载白名单内、base_url 严格指向官方 OpenCode Go 的 API Key 账号。
 //
 // 两种情况都要求 account.Type == AccountTypeAPIKey。
 func IsOpenCodeGoUsageAccount(account *Account) bool {
@@ -963,9 +965,56 @@ func openCodeGoUsageGroupFingerprint(account *Account) (string, bool) {
 	return hex.EncodeToString(sum[:]), true
 }
 
-func isExactOpenCodeGoUsageURL(parsed *url.URL) bool {
-	return parsed != nil && parsed.Scheme == "https" && parsed.Host == "opencode.ai" && parsed.Path == "/zen/go/v1/usage" &&
-		parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.RawPath == ""
+// openCodeGoUsageProbeBaseURL 是这次用量探测要守住的账号 host。
+// 凭据里的 base_url 优先；没有时才用平台默认，避免空基址被改写到别的主机。
+func openCodeGoUsageProbeBaseURL(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	if base := strings.TrimSpace(account.GetCredential("base_url")); base != "" {
+		return base
+	}
+	if base := strings.TrimSpace(account.GetOpenAIBaseURL()); base != "" {
+		return base
+	}
+	return DefaultOpenCodeGoBaseURL
+}
+
+// openCodeGoUsageProbeURL 用账号自己的 base_url 拼额度端点。
+// host 必须和 base_url 一致，中转 key 不能发到 opencode.ai。
+func openCodeGoUsageProbeURL(account *Account) (string, error) {
+	baseRaw := openCodeGoUsageProbeBaseURL(account)
+	baseURL, err := url.Parse(baseRaw)
+	if err != nil || baseURL.Hostname() == "" {
+		return "", ErrOpenCodeGoUsageUnavailable
+	}
+	targetURL, err := url.Parse(openCodeGoQuotaURL(baseRaw))
+	if err != nil || !isPinnedOpenCodeGoUsageURL(targetURL) {
+		return "", ErrOpenCodeGoUsageUnavailable
+	}
+	if !strings.EqualFold(targetURL.Hostname(), baseURL.Hostname()) {
+		return "", ErrOpenCodeGoUsageUnavailable
+	}
+	return targetURL.String(), nil
+}
+
+func isPinnedOpenCodeGoUsageURL(parsed *url.URL) bool {
+	if parsed == nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" {
+		return false
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" {
+		return false
+	}
+	return strings.HasSuffix(parsed.EscapedPath(), "/v1/usage")
+}
+
+func sameOpenCodeGoUsageProbeURL(got, expected *url.URL) bool {
+	if !isPinnedOpenCodeGoUsageURL(got) || !isPinnedOpenCodeGoUsageURL(expected) {
+		return false
+	}
+	return strings.EqualFold(got.Scheme, expected.Scheme) &&
+		strings.EqualFold(got.Host, expected.Host) &&
+		got.EscapedPath() == expected.EscapedPath()
 }
 
 func openCodeGoUsageAutoRefreshEnabled(account *Account) bool {

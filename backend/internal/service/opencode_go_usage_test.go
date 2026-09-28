@@ -302,6 +302,29 @@ func TestOpenCodeGoUsageRefresh200Success(t *testing.T) {
 	require.Equal(t, "application/json", stub.lastRequest.Header.Get("Accept"))
 }
 
+func TestOpenCodeGoUsageRefreshCustomHostStaysOffOfficial(t *testing.T) {
+	account := &Account{
+		ID: 8, Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{
+			"account_mode": AccountModeGo,
+			"api_key":      "sk-relay",
+			"base_url":     "https://relay.example.com/v1",
+		},
+		Extra: map[string]any{},
+	}
+	repo := &openCodeGoUsageTestRepo{accounts: map[int64]*Account{8: account}}
+	stub := &openCodeGoUsageHTTPStub{body: []byte(openCodeGoUsageFixture)}
+	svc := newOpenCodeGoUsageTestService(t, repo, stub, &upstreamBillingProbeSettingRepo{})
+
+	state, err := svc.Refresh(context.Background(), 8)
+	require.NoError(t, err)
+	require.Equal(t, OpenCodeGoUsageStatusOK, state.Snapshot.Status)
+	require.NotNil(t, stub.lastRequest)
+	require.Equal(t, "https://relay.example.com/v1/usage", stub.lastRequest.URL.String())
+	require.NotEqual(t, "opencode.ai", stub.lastRequest.URL.Hostname())
+	require.Equal(t, "Bearer sk-relay", stub.lastRequest.Header.Get("Authorization"))
+}
+
 func TestOpenCodeGoUsageRefresh401Unauthorized(t *testing.T) {
 	account := openCodeGoUsageAccount(7)
 	account.Extra[OpenCodeGoUsageAutoRefreshExtraKey] = true
