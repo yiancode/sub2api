@@ -223,6 +223,63 @@ func TestOpenAIDiagnoseModelAvailabilityForPlatform_RateLimitedSupportingAccount
 	require.True(t, diag.HasModelSupport, "OpenAI-compatible diagnosis must keep transiently limited supporting accounts in the configured pool")
 }
 
+func TestOpenAIDiagnoseModelAvailability_GeminiImageIgnoresAccountsThatCannotServeIt(t *testing.T) {
+	groupID := int64(77)
+	model := "gemini-3.1-flash-image"
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+				AccountGroups: []AccountGroup{{GroupID: groupID}},
+				Credentials:   map[string]any{"model_mapping": map[string]any{model: model}},
+			},
+			{
+				ID: 2, Platform: PlatformOpenAI, Type: AccountTypeSetupToken, Status: StatusActive, Schedulable: true,
+				AccountGroups: []AccountGroup{{GroupID: groupID}},
+				Credentials:   map[string]any{"model_mapping": map[string]any{model: model}},
+			},
+			{
+				ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+				AccountGroups: []AccountGroup{{GroupID: groupID}},
+				Credentials:   map[string]any{"model_mapping": map[string]any{"gpt-image-2": "gpt-image-2"}},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: testConfig()}
+
+	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, model, PlatformOpenAI)
+
+	require.True(t, diag.HasAccountsInPool)
+	require.False(t, diag.HasModelSupport)
+}
+
+func TestOpenAIDiagnoseModelAvailability_GeminiImageAPIKeyStillCounts(t *testing.T) {
+	groupID := int64(78)
+	model := "gemini-3.1-flash-image"
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+				AccountGroups: []AccountGroup{{GroupID: groupID}},
+				Credentials:   map[string]any{"model_mapping": map[string]any{model: model}},
+			},
+			{
+				ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+				AccountGroups: []AccountGroup{{GroupID: groupID}},
+				Credentials:   map[string]any{"model_mapping": map[string]any{model: model}},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: testConfig()}
+
+	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, model, PlatformOpenAI)
+
+	require.True(t, diag.HasAccountsInPool)
+	require.True(t, diag.HasModelSupport)
+}
+
 func TestDiagnoseModelAvailabilityForPlatform_WrongPlatformFiltersOut(t *testing.T) {
 	// Group has only Anthropic accounts; user routes to OpenAI gateway.
 	// Diagnosis must NOT see Anthropic accounts (listSchedulableAccounts filters

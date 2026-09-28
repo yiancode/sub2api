@@ -56,14 +56,26 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	diag := ModelAvailabilityDiagnosis{}
 	for i := range accounts {
 		diag.HasAccountsInPool = true
-		// Mirrors the per-candidate filter used during account selection
-		// (openai_account_scheduler.isAccountRequestCompatible): empty
-		// model_mapping accepts everything; otherwise the explicit / wildcard
-		// mapping must match.
-		if accounts[i].IsModelSupported(requestedModel) {
+		// Mapping matches account selection. Gemini image models also require
+		// an API-key account; see accountSupportsDiagnosedOpenAIModel.
+		if accountSupportsDiagnosedOpenAIModel(&accounts[i], requestedModel) {
 			diag.HasModelSupport = true
 			return diag
 		}
 	}
 	return diag
+}
+
+// accountSupportsDiagnosedOpenAIModel reports persistent model support.
+// Gemini-compatible image models can only be served by API-key accounts, so a
+// native account that lists the model must not count. Otherwise the images
+// handler treats "no eligible account" as a retryable 503.
+func accountSupportsDiagnosedOpenAIModel(account *Account, requestedModel string) bool {
+	if account == nil || !account.IsModelSupported(requestedModel) {
+		return false
+	}
+	if isGeminiCompatibleImageModel(requestedModel) && !account.SupportsOpenAIImageCapability(OpenAIImagesCapabilityAPIKey) {
+		return false
+	}
+	return true
 }
