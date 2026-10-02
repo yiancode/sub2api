@@ -203,6 +203,8 @@ func RegisterGatewayRoutes(
 			}
 			h.Gateway.Messages(c)
 		})
+		// System One carries only JSON text, so it uses the text body limit.
+		gateway.POST("/systemone", textBodyLimit, h.Gateway.SystemOne)
 		// /v1/messages/count_tokens: OpenAI bridges upstream; Grok and CN
 		// providers estimate locally; Anthropic-compatible platforms keep their path.
 		gateway.POST("/messages/count_tokens", countTokensHandler)
