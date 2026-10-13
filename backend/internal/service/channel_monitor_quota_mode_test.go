@@ -446,10 +446,11 @@ func TestMonitorAccountQuotaCapability_Matrix(t *testing.T) {
 			wantErr: ErrChannelMonitorAccountNotSupportable,
 		},
 		{
-			// 自定义/中转域名 kimi coding：按 Platform 识别，额度探测走账号 base_url。
-			name: "custom-domain kimi coding ok",
+			// 自定义/中转域名 kimi coding 不再按 Platform 放行：只认官方 coding URL。
+			name: "custom-domain kimi coding unsupported",
 			account: &Account{ID: 2, Platform: domain.PlatformKimi, Type: AccountTypeAPIKey,
 				Credentials: map[string]any{"account_mode": AccountModeCoding, "base_url": "https://cw.example.com"}},
+			wantErr: ErrChannelMonitorAccountNotSupportable,
 		},
 		{
 			name: "custom-domain zhipu coding ok",

@@ -135,13 +135,10 @@ func (s *CNProviderQuotaService) QueryUsageForAccount(ctx context.Context, accou
 }
 
 func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, account *Account) (*CNProviderQuotaProbeResult, error) {
-	// 自定义/中转 base_url 不含官方域名时，kimi/zhipu 仍按账号 Platform 探测，
-	// 避免回落到官网并带出中转 key。MiniMax 额度端点固定打官方主机，走
-	// GetCodingPlanProvider（只认官方域名）。Command Code、Cline 按平台走各自查询。
-	provider := account.Platform
-	if provider != PlatformKimi && provider != PlatformZhipu {
-		provider = account.GetCodingPlanProvider()
-	}
+	// 识别走 GetCodingPlanProvider：Kimi 只认官方 coding URL，避免路径嵌官方名的
+	// 中转被当成额度端点；智谱自定义/中转按 Platform 识别，请求留在 base_url 主机；
+	// MiniMax 只认官方域名。Command Code、Cline、OpenCode Go 也在该函数里分流。
+	provider := account.GetCodingPlanProvider()
 	if provider == PlatformCommandCode {
 		return s.queryCommandCodeUsage(ctx, account)
 	}

@@ -129,11 +129,20 @@ func isOpenAIPersonalAccessTokenAuthMode(value string) bool {
 	}
 }
 
+// TempUnschedulableRule.Scope 的取值：命中后隔离的粒度。
+const (
+	TempUnschedScopeAccount = "account"
+	TempUnschedScopeModel   = "model"
+)
+
 type TempUnschedulableRule struct {
 	ErrorCode       int      `json:"error_code"`
 	Keywords        []string `json:"keywords"`
 	DurationMinutes int      `json:"duration_minutes"`
 	Description     string   `json:"description"`
+	// Scope 决定命中后的隔离粒度：account 暂停整个账号，model 只冷却本次请求的模型。
+	// 为空时模型已知且非 401 走模型级，否则账号级。
+	Scope string `json:"scope,omitempty"`
 }
 
 func (a *Account) IsActive() bool {
@@ -339,6 +348,13 @@ func (a *Account) IsGeminiGoogleOne() bool {
 	return a.Platform == PlatformGemini && a.Type == AccountTypeOAuth && a.GeminiOAuthType() == "google_one"
 }
 
+// IsGeminiThirdPartyAPIKey reports whether a Gemini API Key account points at a
+// non-Google base URL. Such upstreams carry no AI Studio tier or daily quota.
+func (a *Account) IsGeminiThirdPartyAPIKey() bool {
+	return a != nil && a.Platform == PlatformGemini && a.Type == AccountTypeAPIKey &&
+		!isOfficialGeminiAPIBaseURL(a.GetCredential("base_url"))
+}
+
 func (a *Account) CanGetUsage() bool {
 	return a.Type == AccountTypeOAuth
 }
@@ -460,6 +476,7 @@ func (a *Account) GetTempUnschedulableRules() []TempUnschedulableRule {
 			Keywords:        parseTempUnschedStrings(entry["keywords"]),
 			DurationMinutes: parseTempUnschedInt(entry["duration_minutes"]),
 			Description:     parseTempUnschedString(entry["description"]),
+			Scope:           normalizeTempUnschedScope(entry["scope"]),
 		}
 
 		if rule.ErrorCode <= 0 || rule.DurationMinutes <= 0 || len(rule.Keywords) == 0 {
@@ -470,6 +487,18 @@ func (a *Account) GetTempUnschedulableRules() []TempUnschedulableRule {
 	}
 
 	return rules
+}
+
+// normalizeTempUnschedScope 只认 account / model 两个值，其余一律视为未设置。
+func normalizeTempUnschedScope(raw any) string {
+	switch strings.ToLower(strings.TrimSpace(parseTempUnschedString(raw))) {
+	case TempUnschedScopeAccount:
+		return TempUnschedScopeAccount
+	case TempUnschedScopeModel:
+		return TempUnschedScopeModel
+	default:
+		return ""
+	}
 }
 
 func parseTempUnschedString(value any) string {
@@ -1550,7 +1579,8 @@ func (a *Account) GetCNAPIKey() string {
 // GetCodingPlanProvider 返回额度查询应走的供应商。
 // OpenCode 仅 GO；官方主机上的 Command Code、Cline 按平台识别。
 // kimi/zhipu/minimax 仅 coding 模式；无法识别返回空串。
-// kimi/zhipu 优先用账号 Platform（自定义/中转 base_url 也要能探测），官方域名再作回退。
+// Kimi 只认官方 coding URL（api.kimi.com / api.kimi.ai），路径里嵌官方名的中转不算。
+// 智谱自定义/中转按账号 Platform 识别，额度请求留在 base_url 主机。
 // MiniMax 只认官方域名：自定义中转不得把第三方 Key 发往厂商官方额度端点。
 func (a *Account) GetCodingPlanProvider() string {
 	if a == nil {
@@ -1574,14 +1604,13 @@ func (a *Account) GetCodingPlanProvider() string {
 	if a.GetAccountMode() != AccountModeCoding {
 		return ""
 	}
-	switch a.Platform {
-	case PlatformKimi, PlatformZhipu:
-		return a.Platform
+	if a.Platform == PlatformZhipu {
+		return PlatformZhipu
 	}
 	baseURL := a.GetOpenAIBaseURL()
 	lower := strings.ToLower(baseURL)
 	switch {
-	case strings.Contains(lower, "api.kimi.com/coding"):
+	case isKimiCodingBaseURL(baseURL):
 		return PlatformKimi
 	case strings.Contains(lower, "bigmodel.cn"), strings.Contains(lower, "api.z.ai"):
 		return PlatformZhipu
@@ -1616,6 +1645,24 @@ func isOfficialMiniMaxHost(baseURL string) bool {
 	return hostMatchesDomain(host, "minimax.io") ||
 		hostMatchesDomain(host, "minimaxi.com") ||
 		hostMatchesDomain(host, "minimax.com")
+}
+
+func isKimiCodingBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Opaque != "" ||
+		parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(baseURL, "#") {
+		return false
+	}
+	host := strings.ToLower(parsed.Host)
+	if host != "api.kimi.com" && host != "api.kimi.ai" && host != "api.kimi.com:443" && host != "api.kimi.ai:443" {
+		return false
+	}
+	switch parsed.EscapedPath() {
+	case "/coding", "/coding/", "/coding/v1", "/coding/v1/":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *Account) GetOpenAIAccessToken() string {

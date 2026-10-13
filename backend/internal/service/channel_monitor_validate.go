@@ -210,8 +210,8 @@ func normalizeMonitorPrimaryModel(provider, checkMode, model string) string {
 // fetchUncached 的路由一一对应（coding→CN 额度端点 / payg→CN 余额端点 /
 // 其余→AccountUsageService）。在创建/更新期拦截注定运行期永久 error 的组合：
 //   - kimi/zhipu/deepseek/minimax coding：GetCodingPlanProvider 须识别为 kimi/zhipu/minimax
-//     （deepseek coding 无额度端点；kimi/zhipu 自定义/中转域名按 Platform 识别，可探测；
-//     MiniMax 只认官方域名，自定义中转不可探测）
+//     （deepseek coding 无额度端点；Kimi 只认官方 coding URL，自定义中转不可探测；
+//     智谱自定义/中转按 Platform 识别，可探测；MiniMax 只认官方域名）
 //   - kimi/zhipu/deepseek/minimax payg：仅 kimi/deepseek 有公开余额端点（zhipu/minimax payg 无）
 //   - anthropic：OAuth / Setup Token（API-Key 型无 usage 通道，永久 error）
 //   - openai：OAuth（API-Key 型无 usage 通道）
