@@ -346,6 +346,40 @@ func TestNormalizeGrokChatReasoningEffort(t *testing.T) {
 	patched, err = normalizeGrokChatReasoningEffort([]byte(`{"reasoning_effort":"high"}`), "grok-composer-2.5-fast")
 	require.NoError(t, err)
 	require.False(t, gjson.GetBytes(patched, "reasoning_effort").Exists())
+
+	// 2026-10-13：grok-4.6 对 "none" 直接 400，必须删字段而不是原样下发。
+	patched, err = normalizeGrokChatReasoningEffort([]byte(`{"reasoning_effort":"none","stream":true}`), "grok-4.6")
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(patched, "reasoning_effort").Exists(), string(patched))
+	require.True(t, gjson.GetBytes(patched, "stream").Bool())
+}
+
+// 生产样本（2026-10-13，7 天 248 次 / 24 用户）：Anthropic→Responses 转换把 thinking 关闭写成
+// reasoning.effort=none，grok-4.6 /v1/responses 返回 400
+// "This model does not support `reasoning_effort` value `none`."。none 必须被整体剥离，
+// 其余档位维持原有归一化。
+func TestNormalizeGrokResponsesReasoningEffortDropsNone(t *testing.T) {
+	t.Parallel()
+
+	patched, err := normalizeGrokResponsesReasoningEffort([]byte(`{"model":"grok-4.6","reasoning":{"effort":"none"},"input":"hi"}`), "grok-4.6")
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(patched, "reasoning.effort").Exists(), string(patched))
+	require.False(t, gjson.GetBytes(patched, "reasoning").Exists(), "空 reasoning 对象应一并移除: %s", string(patched))
+	require.Equal(t, "hi", gjson.GetBytes(patched, "input").String())
+
+	patched, err = normalizeGrokResponsesReasoningEffort([]byte(`{"reasoning":{"effort":"none","summary":"auto"}}`), "grok-4.6")
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(patched, "reasoning.effort").Exists(), string(patched))
+	require.Equal(t, "auto", gjson.GetBytes(patched, "reasoning.summary").String(), "非 effort 字段不受影响")
+
+	patched, err = normalizeGrokResponsesReasoningEffort([]byte(`{"reasoning_effort":"none","reasoningEffort":"none"}`), "grok-4.5")
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(patched, "reasoning_effort").Exists(), string(patched))
+	require.False(t, gjson.GetBytes(patched, "reasoningEffort").Exists(), string(patched))
+
+	patched, err = normalizeGrokResponsesReasoningEffort([]byte(`{"reasoning":{"effort":"max"}}`), "grok-4.6")
+	require.NoError(t, err)
+	require.Equal(t, "high", gjson.GetBytes(patched, "reasoning.effort").String(), "其它档位归一化不变")
 }
 
 func TestPatchGrokResponsesBodyDropsNestedUnsupportedFields(t *testing.T) {

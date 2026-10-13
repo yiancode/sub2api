@@ -727,7 +727,14 @@ func normalizeGrokChatReasoningEffort(body []byte, upstreamModel string) ([]byte
 func normalizeGrokReasoningEffortValue(raw, model string) (string, bool) {
 	value := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(raw)))
 	switch value {
-	case "none", "low", "medium", "high":
+	case "none":
+		// Grok 推理模型不接受 "none"：grok-4.6 对 /v1/responses 直接 400
+		// "This model does not support `reasoning_effort` value `none`."
+		// （2026-10-13 生产 7 天 248 次、24 个用户；来源是 Anthropic→Responses 转换把
+		// thinking 关闭写成 none，以及 forward 把 minimal 归一成 none）。
+		// 删掉字段让上游走默认推理档，而不是把 400 回给客户端。
+		return "", false
+	case "low", "medium", "high":
 		return value, true
 	case "minimal":
 		return "low", true
