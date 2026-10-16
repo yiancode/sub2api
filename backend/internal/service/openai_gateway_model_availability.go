@@ -56,6 +56,9 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	diag := ModelAvailabilityDiagnosis{}
 	for i := range accounts {
 		diag.HasAccountsInPool = true
+		if isRetiredOpenAISubscriptionModel(&accounts[i], resolveOpenAIAccountUpstreamModelForRequest(&accounts[i], requestedModel, false)) {
+			diag.HasRetiredSubscriptionModel = true
+		}
 		// Mapping matches account selection. Gemini image models also require
 		// an API-key account; see accountSupportsDiagnosedOpenAIModel.
 		if accountSupportsDiagnosedOpenAIModel(&accounts[i], requestedModel) {
