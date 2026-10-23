@@ -14,8 +14,9 @@ const requiredPins: Record<string, string> = {
   'js-cookie': '3.0.7',
   'form-data@<4.0.6': '>=4.0.6',
   postcss: '8.5.22',
-  'dompurify@<3.4.14': '>=3.4.14',
-  'source-map-js@<1.2.2': '>=1.2.2'
+  'dompurify@<3.4.17': '>=3.4.17',
+  'source-map-js@<1.2.2': '>=1.2.2',
+  'follow-redirects@<1.16.1': '>=1.16.1'
 }
 
 function unquote(raw: string): string {
